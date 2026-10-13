@@ -1,0 +1,12 @@
+node_modules/
+dist/
+api/node_modules/
+api/dist/
+.env
+.env.*
+!.env.example
+!api/.env.example
+test-fixtures/*.png
+test-fixtures/*.pdf
+*.log
+.openai/

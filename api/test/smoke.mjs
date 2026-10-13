@@ -1,0 +1,61 @@
+import assert from 'node:assert/strict';
+import { randomBytes } from 'node:crypto';
+
+const base = process.env.API_URL || 'http://127.0.0.1:3001';
+const suffix = randomBytes(5).toString('hex');
+const pass = `smoke-pass-${suffix}-123`;
+const rules = { formats: ['JPG', 'PDF'], minEachBytes: null, maxEachBytes: 5_000_000, maxTotalBytes: null, maxFiles: 3, maxPages: null, width: 1200, height: 1600 };
+
+async function call(path, { method = 'GET', token, body } = {}) {
+  const response = await fetch(`${base}${path}`, { method, headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), ...(body ? { 'content-type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined });
+  return { status: response.status, data: await response.json(), headers: response.headers };
+}
+
+const health = await call('/api/health');
+assert.equal(health.status, 200);
+assert.equal(health.data.ok, true);
+assert.equal((await call('/api/live')).data.ok, true);
+const first = await call('/api/auth/register', { method: 'POST', body: { username: `smoke_${suffix}`, password: pass } });
+assert.equal(first.status, 201);
+assert.ok(first.data.token);
+const second = await call('/api/auth/register', { method: 'POST', body: { username: `other_${suffix}`, password: pass } });
+assert.equal(second.status, 201);
+const token = first.data.token;
+const otherToken = second.data.token;
+assert.equal((await call('/api/auth/me', { token })).data.username, `smoke_${suffix}`);
+assert.equal((await call('/api/rule-sets')).status, 401);
+const invalid = await call('/api/rule-sets', { method: 'POST', token, body: { title: 'bad', rules: { ...rules, width: -1 } } });
+assert.equal(invalid.status, 400);
+assert.equal(invalid.data.code, 'INVALID_RULES');
+const empty = await call('/api/rule-sets', { method: 'POST', token, body: { title: 'empty', rules: { formats: [], minEachBytes: null, maxEachBytes: null, maxTotalBytes: null, maxFiles: null, maxPages: null, width: null, height: null } } });
+assert.equal(empty.status, 400);
+assert.equal(empty.data.code, 'EMPTY_RULES');
+const created = await call('/api/rule-sets', { method: 'POST', token, body: { title: '지원서 사진', rules } });
+assert.equal(created.status, 201);
+assert.equal(created.data.version, 1);
+const id = created.data.id;
+assert.equal((await call(`/api/rule-sets/${id}`, { token: otherToken })).status, 404);
+const list = await call('/api/rule-sets?q=%EC%A7%80%EC%9B%90&page=1&limit=6', { token });
+assert.equal(list.data.total, 1);
+assert.equal(list.data.items[0].id, id);
+const update = await call(`/api/rule-sets/${id}`, { method: 'PATCH', token, body: { title: '입사지원 사진', rules, expectedVersion: 1 } });
+assert.equal(update.status, 200);
+assert.equal(update.data.version, 2);
+const conflict = await call(`/api/rule-sets/${id}`, { method: 'PATCH', token, body: { title: '덮어쓰기', expectedVersion: 1 } });
+assert.equal(conflict.status, 409);
+assert.equal(conflict.data.code, 'VERSION_CONFLICT');
+const share = await call(`/api/rule-sets/${id}/share`, { method: 'POST', token });
+assert.equal(share.status, 201);
+assert.ok(share.data.shareId);
+const publicRule = await call(`/api/shared/${share.data.shareId}`);
+assert.equal(publicRule.data.title, '입사지원 사진');
+assert.deepEqual(publicRule.data.rules, rules);
+assert.equal((await call(`/api/rule-sets/${id}/share`, { method: 'DELETE', token })).status, 200);
+assert.equal((await call(`/api/shared/${share.data.shareId}`)).status, 404);
+assert.equal((await call(`/api/rule-sets/${id}`, { method: 'DELETE', token: otherToken })).status, 404);
+assert.equal((await call(`/api/rule-sets/${id}`, { method: 'DELETE', token })).status, 200);
+assert.equal((await call('/api/auth/logout', { method: 'POST', token })).status, 201);
+assert.equal((await call('/api/auth/me', { token })).status, 401);
+const login = await call('/api/auth/login', { method: 'POST', body: { username: `smoke_${suffix}`, password: pass } });
+assert.equal(login.status, 201);
+console.log('API smoke test passed: auth, validation, persistence, ownership, version conflict, share and revocation.');
