@@ -6,7 +6,10 @@ services:
     staticPublishPath: ./dist
     envVars:
       - key: VITE_API_BASE_URL
-        sync: false
+        fromService:
+          type: web
+          name: filefit-api
+          envVarKey: RENDER_EXTERNAL_URL
     headers:
       - path: /*
         name: X-Content-Type-Options
@@ -29,4 +32,7 @@ services:
       - key: DATABASE_URL
         sync: false
       - key: FRONTEND_ORIGIN
-        sync: false
+        fromService:
+          type: web
+          name: filefit
+          envVarKey: RENDER_EXTERNAL_URL
