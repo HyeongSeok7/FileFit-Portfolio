@@ -45,19 +45,20 @@ npm run dev
 
 ## Render 배포
 
-루트의 `render.yaml`은 정적 사이트 `filefit`과 싱가포르 리전의 Node 웹 서비스 `filefit-api`를 정의합니다. PostgreSQL은 Neon 같은 **외부 서비스**에서 먼저 생성합니다. Render 무료 PostgreSQL은 30일 후 만료되므로 이 Blueprint에는 포함하지 않았습니다. 소스를 GitHub/GitLab 저장소 최상위에 올리고 Render **New → Blueprint**에서 연결하세요. 동일한 서비스 이름이 이미 있다면 배포 전에 `render.yaml`의 이름을 바꿔 주세요.
+루트의 `render.yaml`은 새 공개 주소용 정적 사이트 `filefit-pf`, 기존 링크 유지용 정적 사이트 `filefit`, 싱가포르 리전의 Node 웹 서비스 `filefit-api`를 정의합니다. PostgreSQL은 Neon 같은 **외부 서비스**에서 먼저 생성합니다. Render 무료 PostgreSQL은 30일 후 만료되므로 이 Blueprint에는 포함하지 않았습니다. 소스를 GitHub/GitLab 저장소 최상위에 올리고 Render **New → Blueprint**에서 연결하세요.
 
 Neon에서 프로젝트를 생성하고 Render API와 가까운 `AWS Asia Pacific (Singapore)` 리전이 제공된다면 선택하세요. **Connection Details**에서 `Direct connection`의 PostgreSQL URL을 복사합니다. 연결 문자열 전체에 비밀번호가 포함되므로 공개 저장소나 프런트엔드 코드에 넣지 마세요. Neon이 제공하는 TLS 설정(`sslmode=require` 등)이 포함된 URL을 그대로 사용합니다.
 
-Blueprint를 처음 배포할 때 아래 세 환경 변수를 입력합니다.
+Blueprint를 처음 배포할 때 `DATABASE_URL`을 입력합니다. 두 사이트의 API 주소와 API의 허용 사이트 주소는 Blueprint가 각 서비스의 실제 Render URL로 자동 연결합니다.
 
 | 서비스 | 변수 | 예시 |
 | --- | --- | --- |
 | `filefit-api` | `DATABASE_URL` | Neon의 **Direct connection** URL 전체. 비밀값이므로 Render 환경 변수에만 입력 |
-| `filefit` | `VITE_API_BASE_URL` | `https://filefit-api.onrender.com` (실제 API 공개 주소) |
-| `filefit-api` | `FRONTEND_ORIGIN` | `https://filefit.onrender.com` (실제 정적 사이트 주소, 끝 슬래시 제외) |
+| `filefit-pf`, `filefit` | `VITE_API_BASE_URL` | `filefit-api`의 실제 공개 주소를 자동 참조 |
+| `filefit-api` | `FRONTEND_ORIGIN` | `filefit-pf`의 실제 공개 주소를 자동 참조 |
+| `filefit-api` | `LEGACY_FRONTEND_ORIGIN` | 기존 `filefit`의 실제 공개 주소를 자동 참조 |
 
-서비스 이름에 따른 URL이 다르면 **실제 Render 주소**로 수정하고 두 서비스를 다시 배포하세요. `VITE_API_BASE_URL`은 Vite 빌드 시 정적 파일에 포함되므로 값을 바꿀 때 Render에서 **Save, rebuild, and deploy**를 선택해야 합니다. `FRONTEND_ORIGIN`과 `VITE_API_BASE_URL`은 각각 사이트 URL과 API URL로 서로 다릅니다. 두 URL에는 끝 슬래시를 넣지 마세요. API는 시작할 때 누락된 SQL 마이그레이션을 적용합니다. `/api/health`가 `{ "ok": true }`를 반환하는지 확인하고, 사이트에서 회원가입→조건 저장→공유→다른 브라우저에서 링크 열기 순서로 점검하세요. Render의 상시 상태 확인은 DB를 깨우지 않는 `/api/live`를 사용합니다.
+새 주소가 원하는 이름으로 생성됐는지 Render 대시보드에서 확인하세요. `VITE_API_BASE_URL`은 Vite 빌드 시 정적 파일에 포함되므로 값을 직접 바꿀 때는 Render에서 **Save, rebuild, and deploy**를 선택해야 합니다. API는 시작할 때 누락된 SQL 마이그레이션을 적용합니다. `/api/health`가 `{ "ok": true }`를 반환하는지 확인하고, 사이트에서 회원가입→조건 저장→공유→다른 브라우저에서 링크 열기 순서로 점검하세요. Render의 상시 상태 확인은 DB를 깨우지 않는 `/api/live`를 사용합니다.
 
 Blueprint의 `DATABASE_URL`은 `sync: false`라서 초기 생성 시에만 Render가 값을 묻습니다. 이후 연결 문자열을 바꾸려면 API 서비스의 **Environment**에서 직접 수정하세요. 무료 API는 비활성 시 잠들기 때문에 첫 요청이 느릴 수 있습니다. 외부 DB도 무료 플랜 한도와 백업 정책을 확인하고, 중요한 조건 데이터라면 별도로 백업하세요. [Render Blueprint 변수 안내](https://render.com/docs/blueprint-spec), [Render 무료 플랜 안내](https://render.com/docs/free)
 

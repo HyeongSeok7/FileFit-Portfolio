@@ -199,7 +199,10 @@ async function bootstrap() {
   const app = await NestFactory.create(ApiModule, { bodyParser: true });
   app.getHttpAdapter().getInstance().set('trust proxy', 1);
   app.useGlobalFilters(new JsonErrorFilter());
-  const origins = (process.env.FRONTEND_ORIGIN ?? '').split(',').map((item) => item.trim().replace(/\/$/, '')).filter(Boolean);
+  const origins = [process.env.FRONTEND_ORIGIN, process.env.LEGACY_FRONTEND_ORIGIN]
+    .flatMap((value) => (value ?? '').split(','))
+    .map((item) => item.trim().replace(/\/$/, ''))
+    .filter(Boolean);
   if (origins.length) app.enableCors({ origin: origins, methods: ['GET', 'POST', 'PATCH', 'DELETE'], allowedHeaders: ['Content-Type', 'Authorization'], credentials: false });
   const port = Number(process.env.PORT || 3001);
   await app.listen(port, '0.0.0.0');
