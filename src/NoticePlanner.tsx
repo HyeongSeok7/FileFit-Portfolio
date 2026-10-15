@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
-import type { FormEvent } from 'react';
-import { ArrowRight, Check, CircleAlert, ClipboardList, LockKeyhole, Sparkles, WandSparkles, X } from 'lucide-react';
+import type { ClipboardEvent, DragEvent, FormEvent } from 'react';
+import { ArrowRight, Check, CircleAlert, ClipboardList, FileText, LockKeyhole, ScanText, Sparkles, UploadCloud, WandSparkles, X } from 'lucide-react';
 import { parseNotice } from './lib/noticeParser';
 import type { NoticeDraft } from './lib/noticeParser';
 import { humanBytes } from './lib/rules';
@@ -47,6 +47,11 @@ export default function NoticePlanner({ session, onLoginClick, onSessionExpired,
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<PlannerError | null>(null);
   const [savedTitle, setSavedTitle] = useState('');
+  const [noticeFiles, setNoticeFiles] = useState<File[]>([]);
+  const [readingFiles, setReadingFiles] = useState(false);
+  const [readingStatus, setReadingStatus] = useState('');
+  const [readingWarnings, setReadingWarnings] = useState<string[]>([]);
+  const [draggingFiles, setDraggingFiles] = useState(false);
   const checklist = useMemo(() => checklistLines(checklistText), [checklistText]);
   const commonRules = draft ? hasRules(draft.rules) : false;
 
@@ -85,6 +90,57 @@ export default function NoticePlanner({ session, onLoginClick, onSessionExpired,
       setChecklistText(result.checklist.join('\n'));
     } catch (failure) {
       setError({ title: '공고 분석 실패', reason: failure instanceof Error ? failure.message : '문구를 읽는 중 문제가 생겼습니다.', advice: '공고 내용을 줄여 다시 시도하거나, 직접 제출 건을 작성해 주세요.' });
+    }
+  }
+
+  function addNoticeFiles(files: File[]) {
+    if (!files.length || readingFiles) return;
+    setNoticeFiles((current) => [...current, ...files]);
+    setReadingStatus(`${files.length}개 파일을 추가했습니다. 글자 읽기를 눌러 주세요.`);
+    setReadingWarnings([]);
+    setError(null);
+  }
+
+  function pasteNoticeImage(event: ClipboardEvent<HTMLElement>) {
+    const pastedFiles = Array.from(event.clipboardData.files);
+    const files = (pastedFiles.length ? pastedFiles : Array.from(event.clipboardData.items).map((item) => item.kind === 'file' ? item.getAsFile() : null).filter((file): file is File => file !== null))
+      .filter((file) => file.type.startsWith('image/'));
+    if (!files.length) return;
+    event.preventDefault();
+    addNoticeFiles(files);
+  }
+
+  function dropNoticeFiles(event: DragEvent<HTMLElement>) {
+    event.preventDefault();
+    setDraggingFiles(false);
+    addNoticeFiles(Array.from(event.dataTransfer.files));
+  }
+
+  async function readFiles() {
+    if (readingFiles || !noticeFiles.length) return;
+    setReadingFiles(true);
+    setReadingWarnings([]);
+    setReadingStatus('글자 읽기를 준비하고 있습니다…');
+    setError(null);
+    try {
+      const { readNoticeFiles } = await import('./lib/noticeOcr');
+      const result = await readNoticeFiles(noticeFiles, setReadingStatus);
+      const combined = [source.trim(), result.text.trim()].filter(Boolean).join('\n\n');
+      setSource(combined);
+      setDraft(null);
+      setChecklistText('');
+      setConfirmed(false);
+      setSavedTitle('');
+      setReadingWarnings(result.warnings);
+      setReadingStatus('글자를 가져왔습니다. 인식된 내용을 확인하고 공고 분석하기를 눌러 주세요.');
+      if (combined.length > 20_000) {
+        setError({ title: '공고 분석 전 정리가 필요합니다', reason: `가져온 문구가 ${combined.length.toLocaleString()}자로 20,000자를 넘습니다.`, advice: '텍스트는 아래에 남아 있습니다. 제출 안내와 마감 조건을 중심으로 줄여 주세요.' });
+      }
+    } catch (failure) {
+      setReadingStatus('글자를 가져오지 못했습니다.');
+      setError({ title: '공고 글자 읽기 실패', reason: failure instanceof Error ? failure.message : '파일을 읽는 중 문제가 생겼습니다.', advice: '공고를 더 선명하게 캡처하거나 다른 이미지·PDF로 다시 시도해 주세요. 입력 중인 텍스트는 그대로 남아 있습니다.' });
+    } finally {
+      setReadingFiles(false);
     }
   }
 
@@ -149,12 +205,22 @@ export default function NoticePlanner({ session, onLoginClick, onSessionExpired,
     } finally { setSaving(false); }
   }
 
-  return <section className="panel notice-planner" role="tabpanel" aria-label="공고문으로 제출 계획 만들기">
-    <div className="notice-planner-heading"><div><span className="notice-planner-kicker"><Sparkles size={14} /> 공고에서 준비까지</span><h3 className="panel-title"><ClipboardList /> 공고문 자동 정리</h3><p>공고를 붙여넣고 추출 결과를 확인하면 제출 건과 체크리스트를 만들 수 있어요.</p></div><span className="notice-planner-privacy"><LockKeyhole size={13} /> 공고 원문은 내 기기에서만 분석</span></div>
+  return <section className="panel notice-planner" role="tabpanel" aria-label="공고문으로 제출 계획 만들기" onPaste={pasteNoticeImage}>
+    <div className="notice-planner-heading"><div><span className="notice-planner-kicker"><Sparkles size={14} /> 공고에서 준비까지</span><h3 className="panel-title"><ClipboardList /> 공고문 자동 정리</h3><p>공고 화면 캡처나 PDF에서 글자를 읽거나, 문구를 붙여넣어 제출 계획을 만들 수 있어요.</p></div><span className="notice-planner-privacy"><LockKeyhole size={13} /> 공고 파일은 내 기기에서만 읽기</span></div>
 
-    <div className="notice-planner-step"><span>01</span><strong>공고문 붙여넣기</strong></div>
-    <label className="field"><span className="field-label">제출 안내 문구</span><textarea className="field-input notice-source" value={source} maxLength={20_000} onChange={(event) => { setSource(event.target.value); setDraft(null); setChecklistText(''); setConfirmed(false); setError(null); setSavedTitle(''); }} placeholder={'예: 2026년 신입 개발자 채용\n접수 마감: 2026. 11. 30.\n제출 서류: 이력서, 자기소개서, 포트폴리오\n모든 파일은 PDF, 파일당 5MB 이하'} /><small className="field-help">텍스트를 붙여넣어 주세요. 스캔 이미지와 PDF 파일 읽기는 아직 지원하지 않습니다. {source.length.toLocaleString()}/20,000자</small></label>
-    <div className="notice-planner-actions"><button type="button" className="button button-primary" onClick={analyze}><WandSparkles size={17} /> 공고 분석하기</button>{source && <button type="button" className="text-button" onClick={() => { setSource(''); setDraft(null); setChecklistText(''); setConfirmed(false); setError(null); setSavedTitle(''); }}><X size={15} /> 내용 지우기</button>}</div>
+    <div className="notice-planner-step"><span>01</span><strong>공고 가져오기</strong></div>
+    <div className="notice-ocr">
+      <label className={`notice-ocr-drop${draggingFiles ? ' is-dragging' : ''}`} onDragOver={(event) => event.preventDefault()} onDragEnter={() => setDraggingFiles(true)} onDragLeave={() => setDraggingFiles(false)} onDrop={dropNoticeFiles}>
+        <UploadCloud aria-hidden="true" /><span><strong>공고 캡처 이미지나 PDF 선택</strong><small>PNG·JPG·WebP·PDF 파일을 놓거나 선택하세요. 캡처한 이미지는 아래 입력칸을 클릭한 뒤 Ctrl+V로 붙여넣을 수도 있어요.</small></span>
+        <input aria-label="공고 이미지 또는 PDF 파일 선택" type="file" accept="image/png,image/jpeg,image/webp,application/pdf,.pdf" multiple disabled={readingFiles} onChange={(event) => { addNoticeFiles(Array.from(event.currentTarget.files ?? [])); event.currentTarget.value = ''; }} />
+      </label>
+      {noticeFiles.length > 0 && <ul className="notice-ocr-file-list">{noticeFiles.map((file, index) => <li key={`${file.name}-${file.lastModified}-${index}`}><FileText size={15} /><span title={file.name}>{file.name}</span><small>{humanBytes(file.size)}</small><button type="button" className="text-button" aria-label={`${file.name} 제거`} disabled={readingFiles} onClick={() => setNoticeFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}><X size={15} /></button></li>)}</ul>}
+      <div className="notice-ocr-actions"><button type="button" className="button button-secondary" disabled={!noticeFiles.length || readingFiles} onClick={() => void readFiles()}><ScanText size={17} /> {readingFiles ? '글자 읽는 중…' : '선택한 파일에서 글자 읽기'}</button><small className="field-help">최대 6개·파일당 15MB·전체 30MB·PDF 파일당 12쪽. 이미지 인식은 첫 사용 시 언어 데이터를 받느라 시간이 걸릴 수 있어요.</small></div>
+      {readingStatus && <div className="notice-ocr-status" role="status"><strong><ScanText size={15} /> {readingStatus}</strong>{readingFiles && <progress aria-label="공고 글자 읽는 중" />}</div>}
+      {readingWarnings.length > 0 && <div className="notice-ocr-warnings" role="alert"><strong><CircleAlert size={16} /> 확인할 파일</strong><ul>{readingWarnings.map((warning, index) => <li key={`${warning}-${index}`}>{warning}</li>)}</ul></div>}
+    </div>
+    <label className="field"><span className="field-label">제출 안내 문구</span><textarea className="field-input notice-source" value={source} maxLength={20_000} disabled={readingFiles} onChange={(event) => { setSource(event.target.value); setDraft(null); setChecklistText(''); setConfirmed(false); setError(null); setSavedTitle(''); }} placeholder={'예: 2026년 신입 개발자 채용\n접수 마감: 2026. 11. 30.\n제출 서류: 이력서, 자기소개서, 포트폴리오\n모든 파일은 PDF, 파일당 5MB 이하'} /><small className="field-help">읽어 온 글자는 빠지거나 틀릴 수 있어요. 원문과 대조해 수정한 뒤 분석해 주세요. {source.length.toLocaleString()}/20,000자</small></label>
+    <div className="notice-planner-actions"><button type="button" className="button button-primary" disabled={readingFiles} onClick={analyze}><WandSparkles size={17} /> 공고 분석하기</button>{source && <button type="button" className="text-button" disabled={readingFiles} onClick={() => { setSource(''); setDraft(null); setChecklistText(''); setConfirmed(false); setError(null); setSavedTitle(''); setReadingStatus(''); setReadingWarnings([]); }}><X size={15} /> 내용 지우기</button>}</div>
 
     {draft && !savedTitle && <form onSubmit={(event) => void save(event)} className="notice-planner-draft">
       <div className="notice-planner-step"><span>02</span><strong>추출 결과 확인·수정</strong></div>

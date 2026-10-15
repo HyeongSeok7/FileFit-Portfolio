@@ -15,7 +15,8 @@
     "pdfjs-dist": "^6.4.299",
     "pica": "^9.0.1",
     "react": "^19.1.1",
-    "react-dom": "^19.1.1"
+    "react-dom": "^19.1.1",
+    "tesseract.js": "^7.0.0"
   },
   "devDependencies": {
     "@types/pica": "^9.0.5",
