@@ -17,8 +17,9 @@ import { submissionApi } from './lib/submissionApi';
 
 const SubmissionPackage = lazy(() => import('./SubmissionPackage'));
 const SubmissionCases = lazy(() => import('./SubmissionCases'));
+const NoticePlanner = lazy(() => import('./NoticePlanner'));
 
-type Tool = 'check' | 'image' | 'pdf' | 'package' | 'submissions';
+type Tool = 'check' | 'image' | 'pdf' | 'package' | 'submissions' | 'notice';
 type FileKind = 'image' | 'pdf' | 'document' | 'unsupported';
 type PdfAction = 'merge' | 'extract' | 'rotate' | 'imagesToPdf' | 'pdfToImages' | 'compress';
 type LoadedFile = {
@@ -121,6 +122,7 @@ function App() {
   const [session, setSession] = useState<AuthSession | null>(() => storedSession());
   const [visitedPackage, setVisitedPackage] = useState(false);
   const [visitedSubmissions, setVisitedSubmissions] = useState(false);
+  const [visitedNotice, setVisitedNotice] = useState(false);
   const [submissionsRefresh, setSubmissionsRefresh] = useState(0);
   const [files, setFiles] = useState<LoadedFile[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -472,6 +474,7 @@ function App() {
   function chooseTool(next: Tool) {
     if (next === 'package') setVisitedPackage(true);
     if (next === 'submissions') setVisitedSubmissions(true);
+    if (next === 'notice') setVisitedNotice(true);
     setTool(next); clearResult(); setOperationError(null);
   }
 
@@ -506,6 +509,7 @@ function App() {
         <a className="brand" href="#top" aria-label="파일핏 처음으로">파일핏<span className="brand-dot">.</span></a>
         <nav className="nav-tabs" aria-label="주요 기능">
           <button className="nav-tab" aria-current={tool === 'check' ? 'page' : undefined} onClick={() => chooseTool('check')}>조건 점검</button>
+          <button className="nav-tab" aria-current={tool === 'notice' ? 'page' : undefined} onClick={() => chooseTool('notice')}>공고 정리</button>
           <button className="nav-tab" aria-current={tool === 'image' ? 'page' : undefined} onClick={() => chooseTool('image')}>이미지</button>
           <button className="nav-tab" aria-current={tool === 'pdf' ? 'page' : undefined} onClick={() => chooseTool('pdf')}>PDF</button>
           <button className="nav-tab" aria-current={tool === 'package' ? 'page' : undefined} onClick={() => chooseTool('package')}>제출 패키지</button>
@@ -530,11 +534,12 @@ function App() {
         <div className="main-grid">
           <section className="workbench" id="workbench" aria-label="파일 작업 공간">
             <div className="section-head">
-              <div><h2>무엇을 도와드릴까요?</h2><p>{coreTool ? '파일을 추가한 뒤 필요한 작업을 선택하세요.' : tool === 'package' ? '서류를 모으고 점검한 뒤 제출용 파일로 저장하세요.' : '지원처별 제출 일정과 체크리스트를 관리하세요.'}</p></div>
+              <div><h2>무엇을 도와드릴까요?</h2><p>{coreTool ? '파일을 추가한 뒤 필요한 작업을 선택하세요.' : tool === 'notice' ? '공고를 읽고 필요한 서류와 마감일을 정리하세요.' : tool === 'package' ? '서류를 모으고 점검한 뒤 제출용 파일로 저장하세요.' : '지원처별 제출 일정과 체크리스트를 관리하세요.'}</p></div>
               <span className="status-pill"><ShieldCheck size={14} /> 파일은 브라우저 내 처리</span>
             </div>
             <div className="tool-tabs" role="tablist" aria-label="작업 선택">
               <button className="tool-tab" role="tab" aria-selected={tool === 'check'} onClick={() => chooseTool('check')}><FileCheck2 size={17} /> 제출 조건 점검</button>
+              <button className="tool-tab" role="tab" aria-selected={tool === 'notice'} onClick={() => chooseTool('notice')}><WandSparkles size={17} /> 공고문 자동 정리</button>
               <button className="tool-tab" role="tab" aria-selected={tool === 'image'} onClick={() => chooseTool('image')}><ImageIcon size={17} /> 이미지 다듬기</button>
               <button className="tool-tab" role="tab" aria-selected={tool === 'pdf'} onClick={() => chooseTool('pdf')}><Files size={17} /> PDF 정리</button>
               <button className="tool-tab" role="tab" aria-selected={tool === 'package'} onClick={() => chooseTool('package')}><FileCheck2 size={17} /> 제출 패키지</button>
@@ -593,7 +598,8 @@ function App() {
 
             {visitedPackage && <div hidden={tool !== 'package'}><Suspense fallback={<div className="panel" role="status">제출 패키지를 불러오는 중입니다…</div>}><SubmissionPackage onSaveCase={session ? savePackageCase : undefined} onLoginClick={openAccount} /></Suspense></div>}
 
-            {visitedSubmissions && <div hidden={tool !== 'submissions'}><Suspense fallback={<div className="panel" role="status">제출 건을 불러오는 중입니다…</div>}><SubmissionCases session={session} onLoginClick={openAccount} refreshSignal={submissionsRefresh} /></Suspense></div>}
+            {visitedSubmissions && <div hidden={tool !== 'submissions'}><Suspense fallback={<div className="panel" role="status">제출 건을 불러오는 중입니다…</div>}><SubmissionCases session={session} onLoginClick={openAccount} refreshSignal={submissionsRefresh} onApplyRules={(nextRules, title) => { setRules(nextRules); setRequirementText(''); setChecked(false); chooseTool('check'); setToast(`「${title}」 검사 기준을 적용했습니다.`); }} /></Suspense></div>}
+            {visitedNotice && <div hidden={tool !== 'notice'}><Suspense fallback={<div className="panel" role="status">공고 정리 도구를 불러오는 중입니다…</div>}><NoticePlanner session={session} onLoginClick={openAccount} onSessionExpired={() => { rememberSession(null); setSession(null); }} onSaved={() => setSubmissionsRefresh((version) => version + 1)} onOpenSubmissions={() => chooseTool('submissions')} onApplyRules={(nextRules) => { setRules(nextRules); setRequirementText(''); setChecked(false); chooseTool('check'); setToast('공고에서 읽은 공통 기준을 적용했습니다. 내용을 확인해 주세요.'); }} /></Suspense></div>}
 
             {tool === 'check' && checked && <section className="result-card" aria-live="polite">
               <div className="result-header"><div><span className={`status-pill ${issueCount ? 'warning' : ''}`}>{issueCount ? <CircleAlert size={14} /> : <Check size={14} />}{issueCount ? `${issueCount}개 항목 확인 필요` : '조건에 맞아요'}</span><h3>{issueCount ? '제출 전 수정할 항목이 있어요' : '지금 설정한 기준을 통과했어요'}</h3></div></div>
@@ -648,7 +654,7 @@ function App() {
 
           <aside className="side-panel" aria-label="서비스 안내">
             <div className="side-icon"><ShieldCheck size={24} /></div><h2>안심하고 준비하세요</h2><p>선택한 파일은 변환과 점검을 위해 브라우저 안에서 처리됩니다. 서버로 업로드하지 않아요.</p>
-            <ul className="feature-list"><li>제출 조건과 파일 상태를 한눈에 확인</li><li>사진 크기·형식·용량을 필요한 만큼 조절</li><li>PDF 합치기·추출·회전·이미지 변환</li><li>문서 검사와 제출 패키지 만들기</li><li>지원처별 체크리스트와 마감일 관리</li></ul>
+            <ul className="feature-list"><li>공고문에서 서류·마감일·공통 조건 정리</li><li>제출 조건과 파일 상태를 한눈에 확인</li><li>사진 크기·형식·용량을 필요한 만큼 조절</li><li>PDF 합치기·추출·회전·이미지 변환</li><li>문서 검사와 제출 패키지 만들기</li><li>지원처별 체크리스트와 마감일 관리</li></ul>
             <div className="side-tip"><span><Sparkles size={16} /> 작은 팁</span><p>제출처가 JPG만 허용한다면 사진 변환에서 저장 형식을 JPG로 고르세요. 변환 후 다시 조건 점검을 해보면 좋아요.</p></div>
           </aside>
         </div>

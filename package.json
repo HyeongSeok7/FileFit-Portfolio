@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc --noEmit && vite build",
-    "test": "node --experimental-strip-types --test test-fixtures/packageTools.test.mjs"
+    "test": "node --experimental-strip-types --test test-fixtures/packageTools.test.mjs test-fixtures/noticeParser.test.mjs"
   },
   "dependencies": {
     "jszip": "^3.10.1",

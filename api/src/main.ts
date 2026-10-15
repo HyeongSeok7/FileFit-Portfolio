@@ -6,7 +6,7 @@ import { NestFactory } from '@nestjs/core';
 import type { Request, Response } from 'express';
 import { Pool } from 'pg';
 import { ApiError, object, password, positiveInt, rules, title, username, uuid } from './validation';
-import { expectedVersion as submissionVersion, submissionFields } from './submissionValidation';
+import { expectedVersion as submissionVersion, fileNameRule, submissionFields } from './submissionValidation';
 
 if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL is required');
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, connectionTimeoutMillis: 10000, max: 10 });
@@ -58,7 +58,7 @@ async function ownerRow(userId: string, id: string) {
   return result.rows[0];
 }
 
-const submissionColumns = 'id, title, destination, due_date::text AS "dueDate", status, checklist, version, created_at AS "createdAt", updated_at AS "updatedAt"';
+const submissionColumns = 'id, title, destination, due_date::text AS "dueDate", status, checklist, rule_set_id AS "ruleSetId", file_name_rule AS "fileNameRule", version, created_at AS "createdAt", updated_at AS "updatedAt"';
 async function ownedSubmission(userId: string, id: string) {
   const result = await pool.query(`SELECT ${submissionColumns} FROM submissions WHERE id = $1 AND user_id = $2`, [id, userId]);
   if (!result.rows[0]) throw new ApiError(404, 'NOT_FOUND', '제출 건을 찾을 수 없습니다.');
@@ -144,9 +144,65 @@ class ApiController {
   async createSubmission(@Req() req: Request, @Body() body: unknown) {
     const user = await authenticate(req);
     const input = submissionFields(body, false);
-    const result = await pool.query(`INSERT INTO submissions (id, user_id, title, destination, due_date, status, checklist) VALUES ($1, $2, $3, $4, $5::date, $6, $7::jsonb) RETURNING ${submissionColumns}`,
-      [randomUUID(), user.id, input.title, input.destination ?? '', input.dueDate ?? null, input.status ?? 'preparing', JSON.stringify(input.checklist ?? [])]);
+    const result = await pool.query(`INSERT INTO submissions (id, user_id, title, destination, due_date, status, checklist, file_name_rule) VALUES ($1, $2, $3, $4, $5::date, $6, $7::jsonb, $8) RETURNING ${submissionColumns}`,
+      [randomUUID(), user.id, input.title, input.destination ?? '', input.dueDate ?? null, input.status ?? 'preparing', JSON.stringify(input.checklist ?? []), input.fileNameRule ?? '']);
     return result.rows[0];
+  }
+
+  @Post('notice-plans')
+  async createNoticePlan(@Req() req: Request, @Body() body: unknown) {
+    const user = await authenticate(req);
+    const input = object(body);
+    if (Object.keys(input).some((key) => !['submission', 'ruleSet', 'fileNameRule'].includes(key)) ||
+        !Object.prototype.hasOwnProperty.call(input, 'submission') ||
+        !Object.prototype.hasOwnProperty.call(input, 'ruleSet') ||
+        !Object.prototype.hasOwnProperty.call(input, 'fileNameRule')) {
+      throw new ApiError(400, 'INVALID_NOTICE_PLAN', '제출 계획의 항목을 확인해 주세요.');
+    }
+    const filenameGuidance = fileNameRule(input.fileNameRule);
+
+    const submissionInput = object(input.submission);
+    if (['title', 'destination', 'dueDate', 'status', 'checklist'].some((key) =>
+      !Object.prototype.hasOwnProperty.call(submissionInput, key)) ||
+        Object.prototype.hasOwnProperty.call(submissionInput, 'fileNameRule')) {
+      throw new ApiError(400, 'INVALID_NOTICE_PLAN', '제출 건의 필수 항목과 파일명 안내 위치를 확인해 주세요.');
+    }
+    const submission = submissionFields(submissionInput, false);
+    if (submission.status !== 'preparing') throw new ApiError(400, 'INVALID_NOTICE_PLAN', '새 제출 계획의 상태는 준비 중이어야 합니다.');
+
+    let ruleSet: { title: string; rules: ReturnType<typeof rules> } | null = null;
+    if (input.ruleSet !== null) {
+      const rawRuleSet = object(input.ruleSet);
+      if (Object.keys(rawRuleSet).some((key) => !['title', 'rules'].includes(key)) ||
+          !Object.prototype.hasOwnProperty.call(rawRuleSet, 'title') ||
+          !Object.prototype.hasOwnProperty.call(rawRuleSet, 'rules')) {
+        throw new ApiError(400, 'INVALID_NOTICE_PLAN', '검사 기준의 항목을 확인해 주세요.');
+      }
+      ruleSet = { title: title(rawRuleSet.title), rules: rules(rawRuleSet.rules) };
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const createdRuleSet = ruleSet
+        ? (await client.query(`INSERT INTO rule_sets (id, user_id, title, rules) VALUES ($1, $2, $3, $4::jsonb) RETURNING ${columns}`,
+          [randomUUID(), user.id, ruleSet.title, JSON.stringify(ruleSet.rules)])).rows[0]
+        : null;
+      const createdSubmission = (await client.query(`INSERT INTO submissions
+        (id, user_id, title, destination, due_date, status, checklist, rule_set_id, file_name_rule)
+        VALUES ($1, $2, $3, $4, $5::date, $6, $7::jsonb, $8, $9)
+        RETURNING ${submissionColumns}`,
+        [randomUUID(), user.id, submission.title, submission.destination,
+          submission.dueDate, submission.status, JSON.stringify(submission.checklist), createdRuleSet?.id ?? null, filenameGuidance])).rows[0];
+      await client.query('COMMIT');
+      return { submission: createdSubmission, ruleSet: createdRuleSet ? saved(createdRuleSet) : null };
+    } catch (error) {
+      try { await client.query('ROLLBACK'); }
+      catch (rollbackError) { console.error('Failed to roll back notice plan:', rollbackError); }
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   @Get('submissions/:id')
@@ -168,14 +224,16 @@ class ApiController {
       due_date = CASE WHEN $7::boolean THEN $8::date ELSE due_date END,
       status = CASE WHEN $9::boolean THEN $10::varchar ELSE status END,
       checklist = CASE WHEN $11::boolean THEN $12::jsonb ELSE checklist END,
+      file_name_rule = CASE WHEN $13::boolean THEN $14::varchar ELSE file_name_rule END,
       version = version + 1, updated_at = now()
-      WHERE id = $1 AND user_id = $2 AND version = $13 RETURNING ${submissionColumns}`,
+      WHERE id = $1 AND user_id = $2 AND version = $15 RETURNING ${submissionColumns}`,
       [id, user.id,
         input.title !== undefined, input.title ?? null,
         input.destination !== undefined, input.destination ?? null,
         input.dueDate !== undefined, input.dueDate ?? null,
         input.status !== undefined, input.status ?? null,
         input.checklist !== undefined, input.checklist === undefined ? null : JSON.stringify(input.checklist),
+        input.fileNameRule !== undefined, input.fileNameRule ?? null,
         version]);
     if (result.rows[0]) return result.rows[0];
     await ownedSubmission(user.id, id);

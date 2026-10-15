@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import { ApiFailure, accountApiConfigured } from './lib/serverApi';
+import { accountApi, ApiFailure, accountApiConfigured } from './lib/serverApi';
 import type { AuthSession } from './lib/serverApi';
 import { submissionApi } from './lib/submissionApi';
 import type { ChecklistItem, SubmissionCase, SubmissionChanges, SubmissionStatus } from './lib/submissionApi';
+import type { SubmissionRules } from './lib/rules';
 import './submissions.css';
 
 type Props = {
@@ -11,6 +12,7 @@ type Props = {
   onFailure?: (task: string, error: unknown, advice: string) => void;
   onLoginClick?: () => void;
   refreshSignal?: number;
+  onApplyRules?: (rules: SubmissionRules, title: string) => void;
 };
 type LocalError = { task: string; reason: string; advice: string };
 
@@ -32,6 +34,7 @@ function draftOf(item: SubmissionCase): SubmissionChanges {
     dueDate: item.dueDate,
     status: item.status,
     checklist: item.checklist.map((entry) => ({ ...entry })),
+    fileNameRule: item.fileNameRule ?? '',
   };
 }
 
@@ -45,7 +48,7 @@ function completedCount(checklist: ChecklistItem[]) {
   return checklist.filter((item) => item.done).length;
 }
 
-export default function SubmissionCases({ session, onFailure, onLoginClick, refreshSignal }: Props) {
+export default function SubmissionCases({ session, onFailure, onLoginClick, refreshSignal, onApplyRules }: Props) {
   const [items, setItems] = useState<SubmissionCase[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -126,13 +129,15 @@ export default function SubmissionCases({ session, onFailure, onLoginClick, refr
     previousRefreshSignal.current = refreshSignal;
     if (!changed || !token || !accountApiConfigured || expired) return;
     let active = true;
-    void submissionApi.list(token, activeSearch, page, PAGE_SIZE).then((result) => {
+    void submissionApi.list(token, '', 1, PAGE_SIZE).then((result) => {
       if (!active) return;
       setItems(result.items);
       setTotal(result.total);
       setPage(result.page);
+      setActiveSearch('');
+      setSearch('');
     }).catch((failure: unknown) => {
-      if (active) report('제출 건 목록 갱신', failure, '패키지 저장 내용이 목록에 보이지 않으면 잠시 후 목록 새로고침을 눌러 주세요.');
+      if (active) report('제출 건 목록 갱신', failure, '새 제출 건이 목록에 보이지 않으면 잠시 후 목록 새로고침을 눌러 주세요.');
     });
     return () => { active = false; };
     // This signal is emitted by the package tool; keep the selected unsaved draft intact.
@@ -223,6 +228,7 @@ export default function SubmissionCases({ session, onFailure, onLoginClick, refr
         dueDate: draft.dueDate || null,
         status: draft.status,
         checklist,
+        fileNameRule: draft.fileNameRule?.trim() ?? '',
       }, selected.version);
       setSelected(value);
       setDraft(draftOf(value));
@@ -266,6 +272,14 @@ export default function SubmissionCases({ session, onFailure, onLoginClick, refr
       await loadList(token, search.trim(), 1);
       setActiveSearch(search.trim());
     }, '검색어를 확인하고 다시 시도해 주세요.');
+  }
+
+  function applyLinkedRules() {
+    if (!token || !selected?.ruleSetId || expired) return;
+    void run('연결된 검사 기준 불러오기', async () => {
+      const savedRules = await accountApi.get(token, selected.ruleSetId!);
+      onApplyRules?.(savedRules.rules, savedRules.title);
+    }, '검사 기준이 삭제되었을 수 있습니다. 조건 점검에서 직접 기준을 입력하거나 새로고침해 주세요.');
   }
 
   const disabled = Boolean(pending) || loading;
@@ -315,6 +329,8 @@ export default function SubmissionCases({ session, onFailure, onLoginClick, refr
                   <label className="field"><span className="field-label">마감일</span><input className="field-input" type="date" value={draft.dueDate ?? ''} onChange={(event) => setDraft({ ...draft, dueDate: event.target.value || null })} /></label>
                   <label className="field"><span className="field-label">진행 상태</span><select className="field-input" value={draft.status} onChange={(event) => setDraft({ ...draft, status: event.target.value as SubmissionStatus })}><option value="preparing">준비 중</option><option value="ready">제출 준비 완료</option><option value="submitted">제출 완료</option></select></label>
                 </div>
+                <label className="field submissions-filename-rule"><span className="field-label">파일명 안내</span><input className="field-input" value={draft.fileNameRule ?? ''} maxLength={240} onChange={(event) => setDraft({ ...draft, fileNameRule: event.target.value })} placeholder="예: 지원자명_서류명.pdf" /><small className="field-help">공고에 파일명 규칙이 있다면 보관해 두고 최종 제출 전에 확인하세요.</small></label>
+                {selected.ruleSetId && <div className="submissions-linked-rule"><span>이 제출 건에 파일 검사 기준이 연결되어 있습니다.</span><button type="button" className="button button-secondary" disabled={disabled} onClick={applyLinkedRules}>조건 점검에 적용</button></div>}
                 <div className="submissions-checklist-title"><strong>필요한 서류</strong><span>{completedCount(draft.checklist)}/{draft.checklist.length}개 완료</span></div>
                 {draft.checklist.length === 0 ? <p className="submissions-list-empty">필요한 서류를 아래에서 추가해 주세요.</p> : <ul className="submissions-checklist">{draft.checklist.map((entry) => <li key={entry.id}><label className="submissions-checkbox"><input type="checkbox" checked={entry.done} onChange={(event) => changeChecklist(entry.id, { done: event.target.checked })} aria-label={`${entry.label || '이름 없는 서류'} 준비 완료`} /></label><input className="field-input" aria-label="서류 이름" value={entry.label} maxLength={120} required onChange={(event) => changeChecklist(entry.id, { label: event.target.value })} /><button className="submissions-remove-item" type="button" aria-label={`${entry.label || '서류'} 삭제`} onClick={() => setDraft({ ...draft, checklist: draft.checklist.filter((item) => item.id !== entry.id) })}>삭제</button></li>)}</ul>}
                 <div className="submissions-add-checklist"><input className="field-input" aria-label="추가할 서류 이름" value={nextChecklistLabel} onChange={(event) => setNextChecklistLabel(event.target.value)} maxLength={120} placeholder="예: 자격증 사본" /><button className="button button-secondary" type="button" disabled={!nextChecklistLabel.trim() || draft.checklist.length >= 30} onClick={addChecklist}>항목 추가</button></div>

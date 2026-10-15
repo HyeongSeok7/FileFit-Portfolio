@@ -5,6 +5,7 @@
 ## 기능
 
 - 한국어 제출 안내 문구에서 형식, 파일당 최소·최대 용량, 전체 용량, 개수, PDF 페이지, 사진 크기를 초안으로 추출하고 직접 수정
+- 공고문을 붙여넣으면 제목·제출처·마감일·필수 서류·공통 파일 조건·파일명 안내를 초안으로 정리. 원문과 대조해 수정·확인한 뒤 제출 건과 검사 기준을 함께 저장
 - 실제 파일 형식·용량·이미지 크기·PDF 페이지를 기준으로 제출 조건 점검
 - 사진 크기·비율·형식 변경, JPG/WebP 목표 용량 탐색
 - PDF 합치기·페이지 추출·회전·사진↔PDF·스캔 PDF 압축
@@ -22,7 +23,7 @@
 | API | `/api` | NestJS. 계정, 로그인 세션, 제출 기준과 제출 건 관리 |
 | DB | PostgreSQL | 사용자, 암호 해시, 세션 토큰 해시, 제출 기준과 체크리스트 저장 |
 
-API는 파일 업로드 경로를 제공하지 않습니다. 제출 기준은 `formats`, `minEachBytes`, `maxEachBytes`, `maxTotalBytes`, `maxFiles`, `maxPages`, `width`, `height`로 저장합니다. 제출 건에는 제목·제출처·마감일·상태·체크리스트만 저장하며 파일 내용은 저장하지 않습니다. 로그인 토큰은 브라우저 `sessionStorage`에 보관되어 탭 세션이 끝나면 사라지고, 서버에는 SHA-256 해시만 남습니다. 비밀번호는 고유 salt로 scrypt 해시합니다. 공유 링크를 가진 사람은 조건만 읽을 수 있으며 소유자가 공유를 중지하면 즉시 접근할 수 없습니다.
+API는 파일 업로드 경로를 제공하지 않습니다. 제출 기준은 `formats`, `minEachBytes`, `maxEachBytes`, `maxTotalBytes`, `maxFiles`, `maxPages`, `width`, `height`로 저장합니다. 제출 건에는 제목·제출처·마감일·상태·체크리스트·파일명 안내와 연결된 검사 기준 ID를 저장하며, 공고 원문과 파일 내용은 저장하지 않습니다. 공고 분석은 브라우저의 규칙 기반 추출이며 외부 AI API를 호출하지 않습니다. 로그인 토큰은 브라우저 `sessionStorage`에 보관되어 탭 세션이 끝나면 사라지고, 서버에는 SHA-256 해시만 남습니다. 비밀번호는 고유 salt로 scrypt 해시합니다. 공유 링크를 가진 사람은 조건만 읽을 수 있으며 소유자가 공유를 중지하면 즉시 접근할 수 없습니다.
 
 ## 로컬 실행
 
@@ -44,7 +45,7 @@ $env:VITE_API_BASE_URL='http://127.0.0.1:3001'
 npm run dev
 ```
 
-브라우저에서 `http://127.0.0.1:5173`에 접속합니다. API 없이 파일 기능만 확인하려면 `VITE_API_BASE_URL`을 설정하지 않고 프런트엔드만 실행하세요. 프런트엔드 빌드는 `npm run build`, 파일 검사·ZIP 테스트는 `npm test`, API 빌드는 `cd api; npm run build`입니다. API가 실행 중이고 테스트 DB를 사용할 수 있을 때 `cd api; npm run test:smoke`로 회원·저장·권한·충돌·공유·제출 건 흐름을 검증할 수 있습니다. 테스트는 임의의 사용자와 조건을 DB에 생성합니다.
+브라우저에서 `http://127.0.0.1:5173`에 접속합니다. API 없이 공고 분석과 파일 기능만 확인하려면 `VITE_API_BASE_URL`을 설정하지 않고 프런트엔드만 실행하세요. 프런트엔드 빌드는 `npm run build`, 공고 추출·파일 검사·ZIP 테스트는 `npm test`, API 빌드는 `cd api; npm run build`입니다. API가 실행 중이고 테스트 DB를 사용할 수 있을 때 `cd api; npm run test:smoke`로 회원·저장·권한·충돌·공유·제출 건·공고 계획 저장 흐름을 검증할 수 있습니다. 테스트는 임의의 사용자와 조건을 DB에 생성합니다.
 
 ## Render 배포
 
@@ -84,6 +85,7 @@ Blueprint의 `DATABASE_URL`은 `sync: false`라서 초기 생성 시에만 Rende
 | `GET /api/shared/:shareId` | 공개된 조건 읽기 전용 조회 |
 | `GET /api/submissions?q=&page=&limit=` | 내 제출 건 검색·페이지 조회 |
 | `POST /api/submissions` | `{title,destination?,dueDate?,status?,checklist?}` 저장 |
+| `POST /api/notice-plans` | 확인한 `{submission,ruleSet,fileNameRule}`을 트랜잭션으로 함께 저장. 공고 원문은 받지 않음 |
 | `GET /api/submissions/:id` | 내 제출 건 조회 |
 | `PATCH /api/submissions/:id` | 수정. `expectedVersion` 필수, 버전 충돌은 409 |
 | `DELETE /api/submissions/:id` | 내 제출 건 삭제 |
@@ -91,5 +93,7 @@ Blueprint의 `DATABASE_URL`은 `sync: false`라서 초기 생성 시에만 Rende
 ## 품질·제한
 
 기존 조건 점검·변환 화면에는 사진 최대 80MB, PDF 최대 100MB, DOCX·XLSX·PPTX·ZIP 최대 30MB를 한 번에 최대 50개까지 추가할 수 있습니다. 제출 패키지는 최대 30개, 파일당 30MB, 전체 100MB까지 처리합니다. 브라우저 메모리·기기 성능에 따라 처리 시간이 초과될 수 있습니다. 문서 형식 검사는 확장자·파일 시작 표시·Office 내부 필수 경로 등을 확인하지만 악성코드 검사나 문서 전체의 정상 동작을 보증하지 않습니다. 사진을 확대해도 원본에 없는 디테일은 복원할 수 없습니다. 스캔 PDF 압축은 페이지를 이미지로 다시 만들어 검색 가능한 텍스트·링크를 잃을 수 있습니다. 제출처의 안내와 최종 업로드 결과를 반드시 확인하세요.
+
+공고 자동 정리는 붙여넣은 텍스트 최대 20,000자를 분석합니다. 연도가 빠졌거나 여러 마감일이 있는 경우 날짜를 자동 확정하지 않고, 서류별 PDF·사진 형식 등은 공통 규칙으로 합치지 않습니다. 스캔 이미지·PDF에서 문구를 읽는 OCR과 AI 기반 해석은 아직 제공하지 않으므로 저장 전에 원문과 대조해 주세요.
 
 인증 요청은 API 인스턴스별 메모리에서 15분 단위로 제한합니다. 여러 API 인스턴스로 확장할 때는 공용 저장소 기반 제한이 필요합니다. 계정 복구와 이메일 인증은 현재 제공하지 않으므로 실제 대규모 서비스 전에는 추가해야 합니다.

@@ -9,12 +9,23 @@ export type SubmissionCase = {
   dueDate: string | null;
   status: SubmissionStatus;
   checklist: ChecklistItem[];
+  ruleSetId: string | null;
+  fileNameRule: string;
   version: number;
   createdAt: string;
   updatedAt: string;
 };
 export type SubmissionPage = { items: SubmissionCase[]; total: number; page: number; limit: number };
-export type SubmissionChanges = Pick<SubmissionCase, 'title' | 'destination' | 'dueDate' | 'status' | 'checklist'>;
+export type SubmissionChanges = Pick<SubmissionCase, 'title' | 'destination' | 'dueDate' | 'status' | 'checklist'> & { fileNameRule?: string };
+export type NoticePlanInput = {
+  submission: SubmissionChanges;
+  ruleSet: { title: string; rules: import('./rules').SubmissionRules } | null;
+  fileNameRule: string;
+};
+export type NoticePlanResult = {
+  submission: SubmissionCase;
+  ruleSet: import('./serverApi').SavedRuleSet | null;
+};
 
 const apiOrigin = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim().replace(/\/+$/, '') ?? '';
 
@@ -63,6 +74,7 @@ export const submissionApi = {
   list: (token: string, q = '', page = 1, limit = 6) => request<SubmissionPage>(`/api/submissions?q=${encodeURIComponent(q)}&page=${page}&limit=${limit}`, token),
   get: (token: string, id: string) => request<SubmissionCase>(`/api/submissions/${encodedId(id)}`, token),
   create: (token: string, values: SubmissionChanges) => request<SubmissionCase>('/api/submissions', token, { method: 'POST', body: values }),
+  createFromNotice: (token: string, values: NoticePlanInput) => request<NoticePlanResult>('/api/notice-plans', token, { method: 'POST', body: values }),
   update: (token: string, id: string, values: SubmissionChanges, expectedVersion: number) => request<SubmissionCase>(`/api/submissions/${encodedId(id)}`, token, { method: 'PATCH', body: { ...values, expectedVersion } }),
   remove: (token: string, id: string) => request<{ ok: true }>(`/api/submissions/${encodedId(id)}`, token, { method: 'DELETE' }),
 };

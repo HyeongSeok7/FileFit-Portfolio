@@ -64,6 +64,7 @@ const submission = await call('/api/submissions', { method: 'POST', token, body:
 assert.equal(submission.status, 201);
 assert.equal(submission.data.version, 1);
 assert.equal(submission.data.checklist[0].label, '이력서');
+assert.equal(submission.data.fileNameRule, '');
 const submissionId = submission.data.id;
 assert.equal((await call(`/api/submissions/${submissionId}`, { token: otherToken })).status, 404);
 const submissionList = await call('/api/submissions?q=%ED%85%8C%EC%8A%A4%ED%8A%B8&page=1&limit=6', { token });
@@ -79,10 +80,42 @@ assert.equal(submissionUpdate.data.checklist[0].done, true);
 const submissionConflict = await call(`/api/submissions/${submissionId}`, { method: 'PATCH', token, body: { title: '충돌', expectedVersion: 1 } });
 assert.equal(submissionConflict.status, 409);
 assert.equal(submissionConflict.data.code, 'VERSION_CONFLICT');
+const planInput = {
+  submission: {
+    title: '공고에서 만든 지원 계획', destination: '테스트 기관', dueDate: '2026-11-30', status: 'preparing',
+    checklist: [{ id: 'resume', label: '이력서', done: false }, { id: 'portfolio', label: '포트폴리오', done: false }],
+  },
+  ruleSet: { title: '테스트 기관 제출 조건', rules },
+  fileNameRule: '지원자명_서류명.pdf',
+};
+assert.equal((await call('/api/notice-plans', { method: 'POST', body: planInput })).status, 401);
+const invalidPlan = await call('/api/notice-plans', { method: 'POST', token, body: { ...planInput, noticeText: '서버에 보내지 않음' } });
+assert.equal(invalidPlan.status, 400);
+assert.equal(invalidPlan.data.code, 'INVALID_NOTICE_PLAN');
+const plan = await call('/api/notice-plans', { method: 'POST', token, body: planInput });
+assert.equal(plan.status, 201);
+assert.equal(plan.data.submission.title, planInput.submission.title);
+assert.equal(plan.data.submission.fileNameRule, planInput.fileNameRule);
+assert.equal(plan.data.submission.ruleSetId, plan.data.ruleSet.id);
+assert.deepEqual(plan.data.ruleSet.rules, rules);
+assert.equal((await call(`/api/submissions/${plan.data.submission.id}`, { token: otherToken })).status, 404);
+assert.equal((await call(`/api/rule-sets/${plan.data.ruleSet.id}`, { token: otherToken })).status, 404);
+assert.equal((await call(`/api/submissions/${plan.data.submission.id}`, { token })).data.ruleSetId, plan.data.ruleSet.id);
+const editedPlan = await call(`/api/submissions/${plan.data.submission.id}`, { method: 'PATCH', token, body: { expectedVersion: 1, fileNameRule: '지원자명-서류명.pdf' } });
+assert.equal(editedPlan.status, 200);
+assert.equal(editedPlan.data.fileNameRule, '지원자명-서류명.pdf');
+const planWithoutRules = await call('/api/notice-plans', { method: 'POST', token, body: { ...planInput, ruleSet: null } });
+assert.equal(planWithoutRules.status, 201);
+assert.equal(planWithoutRules.data.ruleSet, null);
+assert.equal(planWithoutRules.data.submission.ruleSetId, null);
+assert.equal((await call(`/api/rule-sets/${plan.data.ruleSet.id}`, { method: 'DELETE', token })).status, 200);
+assert.equal((await call(`/api/submissions/${plan.data.submission.id}`, { token })).data.ruleSetId, null);
+assert.equal((await call(`/api/submissions/${plan.data.submission.id}`, { method: 'DELETE', token })).status, 200);
+assert.equal((await call(`/api/submissions/${planWithoutRules.data.submission.id}`, { method: 'DELETE', token })).status, 200);
 assert.equal((await call(`/api/submissions/${submissionId}`, { method: 'DELETE', token: otherToken })).status, 404);
 assert.equal((await call(`/api/submissions/${submissionId}`, { method: 'DELETE', token })).status, 200);
 assert.equal((await call('/api/auth/logout', { method: 'POST', token })).status, 201);
 assert.equal((await call('/api/auth/me', { token })).status, 401);
 const login = await call('/api/auth/login', { method: 'POST', body: { username: `smoke_${suffix}`, password: pass } });
 assert.equal(login.status, 201);
-console.log('API smoke test passed: auth, rules, submission cases, validation, ownership, version conflict, share and revocation.');
+console.log('API smoke test passed: auth, rules, submission cases, notice plans, validation, ownership, version conflict, share and revocation.');

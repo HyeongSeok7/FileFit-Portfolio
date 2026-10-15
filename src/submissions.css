@@ -54,6 +54,9 @@
 .submissions-pages { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 14px; color: var(--ink-soft); font-size: .78rem; }
 .submissions-pages .button { min-height: 35px; padding: 7px 11px; }
 .submissions-checklist-title { margin: 19px 0 8px; }
+.submissions-filename-rule { margin-top: 14px; }
+.submissions-linked-rule { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 9px; margin-top: 14px; padding: 11px 12px; border-radius: 10px; background: #f2f6ff; color: var(--blue-dark); font-size: .78rem; font-weight: 700; }
+.submissions-linked-rule .button { min-height: 34px; padding: 6px 10px; font-size: .76rem; }
 .submissions-checklist-title strong { font-size: .86rem; }
 .submissions-checklist-title span { color: var(--ink-muted); font-size: .75rem; font-weight: 700; }
 .submissions-checklist { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }

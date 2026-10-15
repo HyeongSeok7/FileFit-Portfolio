@@ -8,7 +8,15 @@ export type SubmissionInput = {
   dueDate: string | null;
   status: SubmissionStatus;
   checklist: ChecklistItem[];
+  fileNameRule: string;
 };
+
+export function fileNameRule(value: unknown): string {
+  if (typeof value !== 'string' || value.trim().length > 240) {
+    throw new ApiError(400, 'INVALID_FILE_NAME_RULE', '파일명 안내는 240자 이내로 입력해 주세요.');
+  }
+  return value.trim();
+}
 
 function limitedText(value: unknown, field: string, required: boolean): string {
   if (typeof value !== 'string') throw new ApiError(400, 'INVALID_SUBMISSION', `${field}을(를) 문자로 입력해 주세요.`);
@@ -44,9 +52,9 @@ function checklist(value: unknown): ChecklistItem[] {
 
 export function submissionFields(value: unknown, partial: boolean): Partial<SubmissionInput> {
   const input = object(value);
-  const allowed = partial ? ['title', 'destination', 'dueDate', 'status', 'checklist', 'expectedVersion'] : ['title', 'destination', 'dueDate', 'status', 'checklist'];
+  const allowed = partial ? ['title', 'destination', 'dueDate', 'status', 'checklist', 'fileNameRule', 'expectedVersion'] : ['title', 'destination', 'dueDate', 'status', 'checklist', 'fileNameRule'];
   if (Object.keys(input).some((key) => !allowed.includes(key))) throw new ApiError(400, 'INVALID_SUBMISSION', '지원하지 않는 제출 건 항목이 포함되어 있습니다.');
-  if (partial && !['title', 'destination', 'dueDate', 'status', 'checklist'].some((key) => key in input)) throw new ApiError(400, 'INVALID_SUBMISSION', '바꿀 내용을 입력해 주세요.');
+  if (partial && !['title', 'destination', 'dueDate', 'status', 'checklist', 'fileNameRule'].some((key) => key in input)) throw new ApiError(400, 'INVALID_SUBMISSION', '바꿀 내용을 입력해 주세요.');
   if (!partial && input.title === undefined) throw new ApiError(400, 'INVALID_SUBMISSION', '제출 건 이름을 입력해 주세요.');
   const result: Partial<SubmissionInput> = {};
   if (input.title !== undefined) result.title = limitedText(input.title, '제출 건 이름', true);
@@ -57,6 +65,7 @@ export function submissionFields(value: unknown, partial: boolean): Partial<Subm
     result.status = input.status as SubmissionStatus;
   }
   if (input.checklist !== undefined) result.checklist = checklist(input.checklist);
+  if (input.fileNameRule !== undefined) result.fileNameRule = fileNameRule(input.fileNameRule);
   return result;
 }
 
