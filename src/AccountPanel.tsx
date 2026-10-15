@@ -8,11 +8,12 @@ type Props = {
   rules: SubmissionRules;
   onApply: (rules: SubmissionRules, title: string) => void;
   onFailure: (task: string, error: unknown, advice: string) => void;
+  onSessionChange?: (session: AuthSession | null) => void;
 };
 
 const shareId = new URLSearchParams(window.location.search).get('share');
 
-export default function AccountPanel({ rules, onApply, onFailure }: Props) {
+export default function AccountPanel({ rules, onApply, onFailure, onSessionChange }: Props) {
   const hasRules = rules.formats.length > 0 || Object.entries(rules).some(([key, value]) => key !== 'formats' && value !== null);
   const [session, setSession] = useState<AuthSession | null>(() => storedSession());
   const [mode, setMode] = useState<'login' | 'register'>('login');
@@ -36,6 +37,7 @@ export default function AccountPanel({ rules, onApply, onFailure }: Props) {
     if (error instanceof ApiFailure && error.status === 401 && session) {
       rememberSession(null);
       setSession(null);
+      onSessionChange?.(null);
       setItems([]);
       advice = '로그인이 만료되었습니다. 다시 로그인해 주세요. 파일 작업은 계속 사용할 수 있습니다.';
     }
@@ -85,6 +87,7 @@ export default function AccountPanel({ rules, onApply, onFailure }: Props) {
       const result = mode === 'register' ? await accountApi.register(name.trim(), secret) : await accountApi.login(name.trim(), secret);
       rememberSession(result);
       setSession(result);
+      onSessionChange?.(result);
       setSecret('');
       setNotice(`${result.user.username}님, 로그인되었습니다.`);
     }, '아이디와 비밀번호를 확인해 주세요. 서버 연결에 문제가 있다면 잠시 후 다시 시도해 주세요.');
@@ -95,7 +98,7 @@ export default function AccountPanel({ rules, onApply, onFailure }: Props) {
     const token = session.token;
     void run('로그아웃', async () => {
       await accountApi.logout(token);
-      rememberSession(null); setSession(null); setItems([]); setNotice('로그아웃되었습니다.');
+      rememberSession(null); setSession(null); onSessionChange?.(null); setItems([]); setNotice('로그아웃되었습니다.');
     }, '서버 연결을 확인한 뒤 다시 시도해 주세요.');
   }
 
@@ -151,12 +154,12 @@ export default function AccountPanel({ rules, onApply, onFailure }: Props) {
 
   return <section className="account-panel panel" aria-label="제출 기준 저장 및 공유">
     <div className="account-heading"><div><span className="account-kicker">선택 기능</span><h3 className="panel-title">제출 기준 저장 · 공유</h3></div><span className="status-pill">파일은 전송되지 않아요</span></div>
-    <p className="field-help">자주 쓰는 형식·용량·크기 기준만 계정에 저장하세요. 사진과 PDF는 계속 이 브라우저에서 처리합니다.</p>
+    <p className="field-help">자주 쓰는 형식·용량·크기 기준만 계정에 저장하세요. 선택한 파일은 계속 이 브라우저에서 처리합니다.</p>
     {notice && <p className="account-notice" role="status">{notice}</p>}
     {shareId && <div className="shared-rule"><strong>공유받은 조건</strong>{shared ? <><span>{shared.title}</span><p>읽기 전용입니다. 적용하면 현재 입력한 기준이 바뀝니다.</p><button className="button button-secondary" type="button" onClick={() => onApply(shared.rules, shared.title)}>이 조건 적용</button></> : <p>{sharedFailed ? '공유 조건을 불러오지 못했습니다. 위의 실패 이유를 확인해 주세요.' : '공유 조건을 불러오는 중입니다…'}</p>}</div>}
-    {!accountApiConfigured ? <p className="account-offline">계정 서버 연결 전입니다. 제출 조건 점검과 사진·PDF 작업은 바로 사용할 수 있어요.</p> : !session ? <div className="account-auth">
+    {!accountApiConfigured ? <p className="account-offline">계정 서버 연결 전입니다. 제출 조건 점검과 파일 작업은 바로 사용할 수 있어요.</p> : !session ? <div className="account-auth">
       <div className="account-switch"><button type="button" aria-pressed={mode === 'login'} onClick={() => setMode('login')}>로그인</button><button type="button" aria-pressed={mode === 'register'} onClick={() => setMode('register')}>회원가입</button></div>
-      <form className="account-form" onSubmit={submitAuth}><label className="field"><span className="field-label">아이디</span><input className="field-input" autoComplete="username" value={name} onChange={(event) => setName(event.target.value)} minLength={3} maxLength={32} pattern="[a-zA-Z0-9_]+" required placeholder="영문·숫자·밑줄, 3~32자" /></label><label className="field"><span className="field-label">비밀번호</span><input className="field-input" type="password" autoComplete={mode === 'register' ? 'new-password' : 'current-password'} value={secret} onChange={(event) => setSecret(event.target.value)} minLength={12} maxLength={128} required placeholder="12자 이상" /></label><button className="button button-primary" disabled={busy} type="submit">{busy ? '처리 중…' : mode === 'register' ? '가입하고 조건 저장하기' : '로그인'}</button></form>
+      <form className="account-form" onSubmit={submitAuth}><label className="field"><span className="field-label">아이디</span><input className="field-input" autoComplete="username" value={name} onChange={(event) => setName(event.target.value)} minLength={3} maxLength={32} pattern="[a-zA-Z0-9_]+" required placeholder="영문·숫자·밑줄, 3~32자" /></label><label className="field"><span className="field-label">비밀번호</span><input className="field-input" type="password" autoComplete={mode === 'register' ? 'new-password' : 'current-password'} value={secret} onChange={(event) => setSecret(event.target.value)} minLength={12} maxLength={128} required placeholder="12자 이상" /></label><button className="button button-primary" disabled={busy} type="submit">{busy ? '처리 중…' : mode === 'register' ? '가입하기' : '로그인'}</button></form>
     </div> : <div className="account-signed">
       <div className="account-user"><strong>{session.user.username}님의 저장 공간</strong><button className="text-button" type="button" disabled={busy} onClick={logout}>로그아웃</button></div>
       <div className="account-save"><label className="field"><span className="field-label">현재 기준 이름</span><input className="field-input" value={title} onChange={(event) => setTitle(event.target.value)} maxLength={120} placeholder="예: 입사 지원서 사진" /></label><button className="button button-primary" type="button" disabled={busy || !title.trim() || !hasRules} onClick={create}>현재 기준 저장</button></div>

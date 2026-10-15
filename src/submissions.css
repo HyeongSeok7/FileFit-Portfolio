@@ -1,0 +1,87 @@
+.submissions-panel { margin-top: 20px; }
+.submissions-heading, .submissions-section-heading, .submissions-card-top, .submissions-checklist-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.submissions-heading { align-items: flex-start; }
+.submissions-heading .panel-title { margin: 4px 0 0; }
+.submissions-kicker { color: var(--blue); font-size: .72rem; font-weight: 800; letter-spacing: .06em; }
+.submissions-privacy { padding: 6px 10px; border-radius: 99px; background: #eef7f2; color: #176048; font-size: .72rem; font-weight: 750; white-space: nowrap; }
+.submissions-intro { margin: 11px 0 0; color: var(--ink-soft); font-size: .86rem; }
+.submissions-notice, .submissions-error, .submissions-empty { margin: 16px 0 0; padding: 14px 16px; border-radius: 12px; font-size: .85rem; line-height: 1.6; }
+.submissions-notice { color: #176048; background: #e9f8ef; }
+.submissions-error { display: grid; justify-items: start; gap: 4px; border: 1px solid #f1caca; background: #fff4f4; color: #8b2929; }
+.submissions-error p { margin: 0; font-weight: 600; }
+.submissions-error small { font-size: .78rem; }
+.submissions-error .button { margin-top: 8px; }
+.submissions-empty { background: #f3f5f9; color: var(--ink-soft); }
+.submissions-empty strong { color: var(--ink); }
+.submissions-empty p { margin: 5px 0 12px; }
+.submissions-workspace { margin-top: 19px; padding-top: 19px; border-top: 1px solid var(--line); }
+.submissions-create { padding: 19px; border: 1px solid #dce6ff; border-radius: 15px; background: #f7f9ff; }
+.submissions-section-heading { margin-bottom: 13px; }
+.submissions-section-heading > div { display: flex; align-items: center; gap: 9px; }
+.submissions-section-heading h4 { margin: 0; color: var(--ink); font-size: .95rem; }
+.submissions-step { display: inline-flex; align-items: center; justify-content: center; width: 25px; height: 25px; border-radius: 8px; background: #e8eeff; color: var(--blue-dark); font-size: .67rem; font-weight: 850; }
+.submissions-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 13px; }
+.submissions-create .submissions-form-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(145px, .65fr); }
+.submissions-checklist-input { margin: 14px 0; }
+.submissions-checklist-input textarea { resize: vertical; min-height: 80px; }
+.submissions-columns { display: grid; grid-template-columns: minmax(240px, .88fr) minmax(0, 1.12fr); gap: 18px; margin-top: 20px; }
+.submissions-list-section, .submissions-detail-section { min-width: 0; padding: 17px; border: 1px solid var(--line); border-radius: 14px; background: #fff; }
+.submissions-count, .submissions-version { color: var(--ink-muted); font-size: .76rem; font-weight: 700; }
+.submissions-search { display: flex; gap: 7px; }
+.submissions-search input { min-width: 0; }
+.submissions-search button { flex: 0 0 auto; }
+.submissions-refresh { display: block; margin: 8px 0 10px auto; padding: 2px 0; border: 0; background: none; color: var(--blue-dark); font-size: .75rem; font-weight: 700; }
+.submissions-refresh:hover { text-decoration: underline; }
+.submissions-list { display: grid; gap: 8px; }
+.submissions-card { width: 100%; padding: 12px 13px; border: 1px solid var(--line); border-radius: 12px; background: #fff; text-align: left; transition: background-color .15s, border-color .15s, box-shadow .15s; }
+.submissions-card:hover, .submissions-card.is-selected { border-color: #9db1fb; background: #f7f9ff; }
+.submissions-card.is-selected { box-shadow: 0 0 0 2px #e7edff; }
+.submissions-card-top { align-items: flex-start; }
+.submissions-card-top strong { min-width: 0; overflow-wrap: anywhere; color: var(--ink); font-size: .85rem; }
+.submissions-status { flex: 0 0 auto; padding: 3px 7px; border-radius: 99px; font-size: .67rem; font-weight: 800; white-space: nowrap; }
+.submissions-status.status-preparing { background: #f1f3f8; color: #52617a; }
+.submissions-status.status-ready { background: #e8eeff; color: #284cc3; }
+.submissions-status.status-submitted { background: #e7f7ee; color: #137247; }
+.submissions-card-meta, .submissions-card-progress { display: block; margin-top: 6px; color: var(--ink-soft); font-size: .73rem; overflow-wrap: anywhere; }
+.submissions-card-progress { color: var(--blue-dark); font-weight: 750; }
+.submissions-list-empty, .submissions-detail-empty { margin: 10px 0 0; padding: 16px; border-radius: 10px; background: #f7f8fb; color: var(--ink-soft); font-size: .82rem; line-height: 1.6; }
+.submissions-detail-empty { margin-top: 0; }
+.submissions-pages { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 14px; color: var(--ink-soft); font-size: .78rem; }
+.submissions-pages .button { min-height: 35px; padding: 7px 11px; }
+.submissions-checklist-title { margin: 19px 0 8px; }
+.submissions-checklist-title strong { font-size: .86rem; }
+.submissions-checklist-title span { color: var(--ink-muted); font-size: .75rem; font-weight: 700; }
+.submissions-checklist { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
+.submissions-checklist li { display: flex; align-items: center; gap: 7px; }
+.submissions-checklist li .field-input { min-width: 0; }
+.submissions-checkbox { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 26px; }
+.submissions-checkbox input { width: 18px; height: 18px; accent-color: var(--blue); cursor: pointer; }
+.submissions-remove-item, .submissions-delete { border: 0; background: transparent; color: #b04444; font-size: .76rem; font-weight: 750; white-space: nowrap; }
+.submissions-remove-item:hover, .submissions-delete:hover { text-decoration: underline; }
+.submissions-add-checklist { display: flex; gap: 7px; margin-top: 11px; }
+.submissions-add-checklist input { min-width: 0; }
+.submissions-add-checklist button { flex: 0 0 auto; }
+.submissions-caution { margin: 11px 0 0; padding: 9px 11px; border-radius: 9px; background: #fff3dc; color: #865315; font-size: .78rem; }
+.submissions-edit-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 19px; }
+.submissions-edit-actions .button { min-height: 39px; }
+.submissions-delete { margin-left: auto; }
+.submissions-unsaved { margin: 9px 0 0; color: #865315; font-size: .75rem; font-weight: 700; }
+.submissions-updated { margin: 12px 0 0; color: var(--ink-muted); font-size: .71rem; }
+
+@media (max-width: 800px) {
+  .submissions-columns { grid-template-columns: 1fr; }
+  .submissions-create .submissions-form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 550px) {
+  .submissions-heading { flex-wrap: wrap; }
+  .submissions-create { padding: 14px; }
+  .submissions-create .submissions-form-grid, .submissions-form-grid { grid-template-columns: 1fr; }
+  .submissions-list-section, .submissions-detail-section { padding: 13px; }
+  .submissions-edit-actions .button { flex: 1 1 auto; }
+  .submissions-delete { margin-left: 0; }
+}

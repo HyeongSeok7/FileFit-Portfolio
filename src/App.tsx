@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent, DragEvent, KeyboardEvent } from 'react';
 import {
   ArrowDown, ArrowRight, ArrowUp, Check, CheckCheck, ChevronDown, CircleAlert,
@@ -11,9 +11,15 @@ import type { ImageFormat } from './lib/imageTools';
 import { emptyRules, formatOf, humanBytes, parseRequirements, validateFile } from './lib/rules';
 import type { FileDetails, SubmissionRules } from './lib/rules';
 import AccountPanel from './AccountPanel';
+import { ApiFailure, rememberSession, storedSession } from './lib/serverApi';
+import type { AuthSession } from './lib/serverApi';
+import { submissionApi } from './lib/submissionApi';
 
-type Tool = 'check' | 'image' | 'pdf';
-type FileKind = 'image' | 'pdf' | 'unsupported';
+const SubmissionPackage = lazy(() => import('./SubmissionPackage'));
+const SubmissionCases = lazy(() => import('./SubmissionCases'));
+
+type Tool = 'check' | 'image' | 'pdf' | 'package' | 'submissions';
+type FileKind = 'image' | 'pdf' | 'document' | 'unsupported';
 type PdfAction = 'merge' | 'extract' | 'rotate' | 'imagesToPdf' | 'pdfToImages' | 'compress';
 type LoadedFile = {
   id: string;
@@ -40,12 +46,14 @@ const KB = 1024;
 const MAX_FILES = 50;
 const MAX_IMAGE_BYTES = 80 * MB;
 const MAX_PDF_BYTES = 100 * MB;
+const MAX_DOCUMENT_BYTES = 30 * MB;
 const EXT: Record<ImageFormat, string> = { jpeg: 'jpg', png: 'png', webp: 'webp' };
 const SCANNED_PDF_COMPRESSION_WARNING = '스캔 PDF 압축은 각 페이지를 이미지로 다시 만듭니다. 선택 가능한 텍스트, 검색 기능, 링크, 입력 양식 및 접근성 정보가 사라질 수 있습니다. 원본을 보관해 주세요.';
 
 function fileKind(file: File): FileKind {
   if (/\.(jpe?g|png|webp)$/i.test(file.name)) return 'image';
   if (/\.pdf$/i.test(file.name)) return 'pdf';
+  if (/\.(docx|xlsx|pptx|zip)$/i.test(file.name)) return 'document';
   return 'unsupported';
 }
 
@@ -110,6 +118,10 @@ function App() {
   const pendingRuleImageRef = useRef<string | null>(null);
   const filesRef = useRef<LoadedFile[]>([]);
   const [tool, setTool] = useState<Tool>('check');
+  const [session, setSession] = useState<AuthSession | null>(() => storedSession());
+  const [visitedPackage, setVisitedPackage] = useState(false);
+  const [visitedSubmissions, setVisitedSubmissions] = useState(false);
+  const [submissionsRefresh, setSubmissionsRefresh] = useState(0);
   const [files, setFiles] = useState<LoadedFile[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -133,6 +145,7 @@ function App() {
   const [rotation, setRotation] = useState(90);
   const [pdfImageFormat, setPdfImageFormat] = useState<'jpeg' | 'png'>('jpeg');
   const [pdfQuality, setPdfQuality] = useState(80);
+  const coreTool = tool === 'check' || tool === 'image' || tool === 'pdf';
 
   filesRef.current = files;
   useEffect(() => () => {
@@ -235,20 +248,25 @@ function App() {
     setOperationError(null);
     await Promise.all(newItems.map(async (item) => {
       try {
-        if (item.kind === 'unsupported') throw new Error('JPG, PNG, WebP, PDF 파일만 지원합니다.');
-        if (item.file.size > (item.kind === 'pdf' ? MAX_PDF_BYTES : MAX_IMAGE_BYTES)) {
-          throw new Error(item.kind === 'pdf' ? 'PDF는 100MB 이하만 처리할 수 있습니다.' : '이미지는 80MB 이하만 처리할 수 있습니다.');
+        if (item.kind === 'unsupported') throw new Error('JPG, PNG, WebP, PDF, DOCX, XLSX, PPTX, ZIP 파일만 지원합니다.');
+        if (item.file.size > (item.kind === 'pdf' ? MAX_PDF_BYTES : item.kind === 'image' ? MAX_IMAGE_BYTES : MAX_DOCUMENT_BYTES)) {
+          throw new Error(item.kind === 'pdf' ? 'PDF는 100MB 이하만 처리할 수 있습니다.' : item.kind === 'image' ? '이미지는 80MB 이하만 처리할 수 있습니다.' : '문서·ZIP은 30MB 이하만 검사할 수 있습니다.');
         }
         if (item.kind === 'image') {
           const info = await withTimeout(inspectImage(item.file), 15_000, '이미지 확인');
           const preview = URL.createObjectURL(item.file);
           setFiles((old) => old.map((candidate) => candidate.id === item.id
             ? { ...candidate, status: 'ready', details: { width: info.width, height: info.height, format: info.format === 'jpeg' ? 'JPG' : info.format.toUpperCase() }, preview } : candidate));
-        } else {
+        } else if (item.kind === 'pdf') {
           const { inspectPdf } = await import('./lib/pdfTools');
           const info = await withTimeout(inspectPdf(item.file), 40_000, 'PDF 확인');
           setFiles((old) => old.map((candidate) => candidate.id === item.id
             ? { ...candidate, status: 'ready', details: { pages: info.pageCount, format: 'PDF' }, preview: info.thumbnail } : candidate));
+        } else {
+          const { inspectPackageFile } = await import('./lib/packageTools');
+          const info = await withTimeout(inspectPackageFile(item.file), 40_000, '문서 확인');
+          setFiles((old) => old.map((candidate) => candidate.id === item.id
+            ? { ...candidate, status: 'ready', details: { format: info.format } } : candidate));
         }
       } catch (error) {
         reportFailure(`${item.file.name} 확인`, error, 'select');
@@ -452,7 +470,34 @@ function App() {
   }
 
   function chooseTool(next: Tool) {
+    if (next === 'package') setVisitedPackage(true);
+    if (next === 'submissions') setVisitedSubmissions(true);
     setTool(next); clearResult(); setOperationError(null);
+  }
+
+  function openAccount() {
+    chooseTool('check');
+    window.requestAnimationFrame(() => document.querySelector('.account-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  }
+
+  async function savePackageCase(title: string, checklist: Array<{ id: string; label: string; done: boolean }>, destination: string) {
+    if (!session) throw new Error('로그인한 뒤 제출 건을 저장할 수 있습니다.');
+    try {
+      await submissionApi.create(session.token, {
+        title,
+        destination,
+        dueDate: null,
+        status: 'preparing',
+        checklist,
+      });
+      setSubmissionsRefresh((version) => version + 1);
+    } catch (error) {
+      if (error instanceof ApiFailure && error.status === 401) {
+        rememberSession(null);
+        setSession(null);
+      }
+      throw error;
+    }
   }
 
   return (
@@ -463,6 +508,8 @@ function App() {
           <button className="nav-tab" aria-current={tool === 'check' ? 'page' : undefined} onClick={() => chooseTool('check')}>조건 점검</button>
           <button className="nav-tab" aria-current={tool === 'image' ? 'page' : undefined} onClick={() => chooseTool('image')}>이미지</button>
           <button className="nav-tab" aria-current={tool === 'pdf' ? 'page' : undefined} onClick={() => chooseTool('pdf')}>PDF</button>
+          <button className="nav-tab" aria-current={tool === 'package' ? 'page' : undefined} onClick={() => chooseTool('package')}>제출 패키지</button>
+          <button className="nav-tab" aria-current={tool === 'submissions' ? 'page' : undefined} onClick={() => chooseTool('submissions')}>제출 건</button>
         </nav>
       </header>
 
@@ -471,7 +518,7 @@ function App() {
           <div className="hero-copy">
             <span className="eyebrow">제출 전 마지막 확인, 한곳에서</span>
             <h1 id="hero-title" className="hero-title">서류 제출 준비,<br /><strong>파일핏</strong>으로 가볍게.</h1>
-            <p className="hero-sub">파일 형식과 용량을 확인하고, 사진·PDF를 필요한 크기로 정리하세요. 복잡한 설치 없이 브라우저에서 바로 시작할 수 있어요.</p>
+            <p className="hero-sub">파일 형식과 용량을 확인하고, 사진·PDF를 정리한 뒤 제출할 서류를 한 번에 준비하세요. 복잡한 설치 없이 브라우저에서 바로 시작할 수 있어요.</p>
             <div className="hero-points"><span><Check size={15} /> 가입 없이 사용</span><span><LockKeyhole size={15} /> 파일은 내 기기에서 처리</span></div>
           </div>
           <div className="hero-art" aria-hidden="true">
@@ -483,25 +530,27 @@ function App() {
         <div className="main-grid">
           <section className="workbench" id="workbench" aria-label="파일 작업 공간">
             <div className="section-head">
-              <div><h2>무엇을 도와드릴까요?</h2><p>파일을 추가한 뒤 필요한 작업을 선택하세요.</p></div>
-              <span className="status-pill"><ShieldCheck size={14} /> 브라우저 내 처리</span>
+              <div><h2>무엇을 도와드릴까요?</h2><p>{coreTool ? '파일을 추가한 뒤 필요한 작업을 선택하세요.' : tool === 'package' ? '서류를 모으고 점검한 뒤 제출용 파일로 저장하세요.' : '지원처별 제출 일정과 체크리스트를 관리하세요.'}</p></div>
+              <span className="status-pill"><ShieldCheck size={14} /> 파일은 브라우저 내 처리</span>
             </div>
             <div className="tool-tabs" role="tablist" aria-label="작업 선택">
               <button className="tool-tab" role="tab" aria-selected={tool === 'check'} onClick={() => chooseTool('check')}><FileCheck2 size={17} /> 제출 조건 점검</button>
               <button className="tool-tab" role="tab" aria-selected={tool === 'image'} onClick={() => chooseTool('image')}><ImageIcon size={17} /> 이미지 다듬기</button>
               <button className="tool-tab" role="tab" aria-selected={tool === 'pdf'} onClick={() => chooseTool('pdf')}><Files size={17} /> PDF 정리</button>
+              <button className="tool-tab" role="tab" aria-selected={tool === 'package'} onClick={() => chooseTool('package')}><FileCheck2 size={17} /> 제출 패키지</button>
+              <button className="tool-tab" role="tab" aria-selected={tool === 'submissions'} onClick={() => chooseTool('submissions')}><FileText size={17} /> 제출 건 관리</button>
             </div>
 
-            <div className={`dropzone ${dragging ? 'dropzone-active' : ''}`} onDrop={handleDrop} onDragOver={(event) => event.preventDefault()} onDragEnter={(event) => { event.preventDefault(); setDragging(true); }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragging(false); }} onKeyDown={handleDropKey} role="button" tabIndex={0} aria-label="파일 선택 또는 여기로 끌어 놓기">
+            {coreTool && <div className={`dropzone ${dragging ? 'dropzone-active' : ''}`} onDrop={handleDrop} onDragOver={(event) => event.preventDefault()} onDragEnter={(event) => { event.preventDefault(); setDragging(true); }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragging(false); }} onKeyDown={handleDropKey} role="button" tabIndex={0} aria-label="파일 선택 또는 여기로 끌어 놓기">
               <UploadCloud aria-hidden="true" />
               <strong>파일을 이곳에 놓거나 선택하세요</strong>
-              <p>JPG, PNG, WebP, PDF · 이미지 최대 80MB · PDF 최대 100MB</p>
+              <p>JPG, PNG, WebP, PDF, DOCX, XLSX, PPTX, ZIP · 이미지 80MB · PDF 100MB · 문서 30MB 이하</p>
               <button className="button button-secondary drop-button" type="button" onClick={() => inputRef.current?.click()}><FilePlus2 size={16} /> 파일 선택</button>
-              <input ref={inputRef} className="visually-hidden" type="file" accept=".jpg,.jpeg,.png,.webp,.pdf,image/jpeg,image/png,image/webp,application/pdf" multiple onChange={(event: ChangeEvent<HTMLInputElement>) => { void addFiles(event.target.files ?? []); event.target.value = ''; }} />
-            </div>
+              <input ref={inputRef} className="visually-hidden" type="file" accept=".jpg,.jpeg,.png,.webp,.pdf,.docx,.xlsx,.pptx,.zip,image/jpeg,image/png,image/webp,application/pdf" multiple onChange={(event: ChangeEvent<HTMLInputElement>) => { void addFiles(event.target.files ?? []); event.target.value = ''; }} />
+            </div>}
 
-            {files.length > 0 && <div className="files-heading"><strong>추가한 파일 <span>{files.length}</span></strong><button className="text-button" onClick={clearFiles}><Trash2 size={14} /> 모두 지우기</button></div>}
-            {files.length > 0 && <div className="file-list" aria-live="polite">
+            {coreTool && files.length > 0 && <div className="files-heading"><strong>추가한 파일 <span>{files.length}</span></strong><button className="text-button" onClick={clearFiles}><Trash2 size={14} /> 모두 지우기</button></div>}
+            {coreTool && files.length > 0 && <div className="file-list" aria-live="polite">
               {files.map((item, index) => <div className={`file-row ${selectedForTool?.id === item.id && tool !== 'check' ? 'file-row-selected' : ''}`} key={item.id}>
                 <span className={`file-icon ${item.kind === 'pdf' ? 'file-icon-pdf' : ''}`}>{item.kind === 'pdf' ? 'PDF' : item.kind === 'image' ? formatOf(item.file) : '?'}</span>
                 <div className="file-meta"><strong title={item.file.name}>{item.file.name}</strong><small>{humanBytes(item.file.size)}{item.status === 'ready' && item.details.width ? ` · ${item.details.width} × ${item.details.height}px` : ''}{item.status === 'ready' && item.details.pages ? ` · ${item.details.pages}페이지` : ''}{item.status === 'loading' ? ' · 확인 중…' : ''}{item.status === 'error' ? ` · ${item.error}` : ''}</small></div>
@@ -540,7 +589,11 @@ function App() {
               {!hasRules && <p className="field-help muted-note">제출 기준을 하나 이상 입력하면 검사를 시작할 수 있어요.</p>}
             </section>}
 
-            {tool === 'check' && <AccountPanel rules={rules} onApply={(savedRules, title) => { setRules(savedRules); setChecked(false); setToast(`「${title}」 제출 기준을 적용했습니다.`); }} onFailure={(task, error, advice) => { setOperationError({ task: `${task} 실패`, reason: error instanceof Error ? error.message : String(error ?? '알 수 없는 오류'), advice }); window.requestAnimationFrame(() => document.querySelector('.operation-error')?.scrollIntoView({ behavior: 'smooth', block: 'center' })); }} />}
+            {tool === 'check' && <AccountPanel rules={rules} onApply={(savedRules, title) => { setRules(savedRules); setChecked(false); setToast(`「${title}」 제출 기준을 적용했습니다.`); }} onSessionChange={setSession} onFailure={(task, error, advice) => { setOperationError({ task: `${task} 실패`, reason: error instanceof Error ? error.message : String(error ?? '알 수 없는 오류'), advice }); window.requestAnimationFrame(() => document.querySelector('.operation-error')?.scrollIntoView({ behavior: 'smooth', block: 'center' })); }} />}
+
+            {visitedPackage && <div hidden={tool !== 'package'}><Suspense fallback={<div className="panel" role="status">제출 패키지를 불러오는 중입니다…</div>}><SubmissionPackage onSaveCase={session ? savePackageCase : undefined} onLoginClick={openAccount} /></Suspense></div>}
+
+            {visitedSubmissions && <div hidden={tool !== 'submissions'}><Suspense fallback={<div className="panel" role="status">제출 건을 불러오는 중입니다…</div>}><SubmissionCases session={session} onLoginClick={openAccount} refreshSignal={submissionsRefresh} /></Suspense></div>}
 
             {tool === 'check' && checked && <section className="result-card" aria-live="polite">
               <div className="result-header"><div><span className={`status-pill ${issueCount ? 'warning' : ''}`}>{issueCount ? <CircleAlert size={14} /> : <Check size={14} />}{issueCount ? `${issueCount}개 항목 확인 필요` : '조건에 맞아요'}</span><h3>{issueCount ? '제출 전 수정할 항목이 있어요' : '지금 설정한 기준을 통과했어요'}</h3></div></div>
@@ -585,7 +638,7 @@ function App() {
               <div className="action-row action-row-end"><button className="button button-primary" disabled={busy || (pdfAction === 'imagesToPdf' ? !readyImages.length : pdfAction === 'merge' ? readyPdfs.length < 2 : !activePdf)} onClick={() => void processPdf()}>{busy ? <span className="spinner" /> : <Sparkles />} {busy ? '처리 중…' : '작업 시작하기'} <ArrowRight /></button></div>
             </section>}
 
-            {result && tool !== 'check' && <section className="result-card" aria-live="polite"><div className="result-header"><div><span className="status-pill"><Check size={14} /> 완료</span><h3>{result.title}</h3><p>결과를 확인하고 파일을 저장하세요.</p></div><button className="icon-button" aria-label="결과 닫기" onClick={clearResult}><X size={18} /></button></div>
+            {result && (tool === 'image' || tool === 'pdf') && <section className="result-card" aria-live="polite"><div className="result-header"><div><span className="status-pill"><Check size={14} /> 완료</span><h3>{result.title}</h3><p>결과를 확인하고 파일을 저장하세요.</p></div><button className="icon-button" aria-label="결과 닫기" onClick={clearResult}><X size={18} /></button></div>
               {result.preview && <div className="result-preview"><img src={result.preview} alt="변환 결과 미리보기" /></div>}
               <div className="stat-grid"><div className="stat"><small>원본 용량</small><strong>{result.sourceBytes === undefined ? '—' : humanBytes(result.sourceBytes)}</strong></div><div className="stat"><small>결과 용량</small><strong>{humanBytes(result.blob.size)}</strong></div>{result.dimensions && <div className="stat"><small>결과 크기</small><strong>{result.dimensions}</strong></div>}</div>
               {result.warning && <div className="notice warning-notice"><CircleAlert /> {result.warning}</div>}
@@ -595,14 +648,14 @@ function App() {
 
           <aside className="side-panel" aria-label="서비스 안내">
             <div className="side-icon"><ShieldCheck size={24} /></div><h2>안심하고 준비하세요</h2><p>선택한 파일은 변환과 점검을 위해 브라우저 안에서 처리됩니다. 서버로 업로드하지 않아요.</p>
-            <ul className="feature-list"><li>제출 조건과 파일 상태를 한눈에 확인</li><li>사진 크기·형식·용량을 필요한 만큼 조절</li><li>PDF 합치기·추출·회전·이미지 변환</li><li>회원가입이나 별도 프로그램 설치 없이 사용</li></ul>
+            <ul className="feature-list"><li>제출 조건과 파일 상태를 한눈에 확인</li><li>사진 크기·형식·용량을 필요한 만큼 조절</li><li>PDF 합치기·추출·회전·이미지 변환</li><li>문서 검사와 제출 패키지 만들기</li><li>지원처별 체크리스트와 마감일 관리</li></ul>
             <div className="side-tip"><span><Sparkles size={16} /> 작은 팁</span><p>제출처가 JPG만 허용한다면 사진 변환에서 저장 형식을 JPG로 고르세요. 변환 후 다시 조건 점검을 해보면 좋아요.</p></div>
           </aside>
         </div>
 
-        <section className="how-section" aria-label="이용 방법"><div className="section-head"><div><h2>세 단계면 준비 끝</h2><p>처음 사용해도 순서대로 따라오면 돼요.</p></div></div><div className="step-grid"><div><span>01</span><UploadCloud size={23} /><h3>파일 추가</h3><p>제출할 사진이나 PDF를 선택하세요.</p></div><div><span>02</span><ChevronDown size={23} /><h3>조건 선택</h3><p>안내 문구를 붙여 넣거나 직접 입력하세요.</p></div><div><span>03</span><Download size={23} /><h3>확인하고 저장</h3><p>필요한 부분을 고쳐 결과를 내려받으세요.</p></div></div></section>
+        <section className="how-section" aria-label="이용 방법"><div className="section-head"><div><h2>세 단계면 준비 끝</h2><p>처음 사용해도 순서대로 따라오면 돼요.</p></div></div><div className="step-grid"><div><span>01</span><UploadCloud size={23} /><h3>파일 추가</h3><p>제출할 사진이나 문서를 선택하세요.</p></div><div><span>02</span><ChevronDown size={23} /><h3>조건 선택</h3><p>제출 기준과 필요한 서류를 확인하세요.</p></div><div><span>03</span><Download size={23} /><h3>확인하고 저장</h3><p>필요한 부분을 고쳐 결과를 내려받으세요.</p></div></div></section>
       </main>
-      <footer className="footer"><span>© {new Date().getFullYear()} 파일핏 · 서류 준비를 더 간단하게</span><span>파일은 브라우저에서만 처리 · PDF와 이미지 원본은 본인이 보관해 주세요</span></footer>
+      <footer className="footer"><span>© {new Date().getFullYear()} 파일핏 · 서류 준비를 더 간단하게</span><span>파일은 브라우저에서만 처리 · 원본은 본인이 보관해 주세요</span></footer>
       {toast && <div className="toast" role="alert"><CircleAlert size={17} /> {toast}<button aria-label="알림 닫기" onClick={() => setToast('')}><X size={15} /></button></div>}
     </div>
   );

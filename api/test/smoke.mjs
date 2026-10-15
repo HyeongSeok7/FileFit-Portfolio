@@ -4,7 +4,7 @@ import { randomBytes } from 'node:crypto';
 const base = process.env.API_URL || 'http://127.0.0.1:3001';
 const suffix = randomBytes(5).toString('hex');
 const pass = `smoke-pass-${suffix}-123`;
-const rules = { formats: ['JPG', 'PDF'], minEachBytes: null, maxEachBytes: 5_000_000, maxTotalBytes: null, maxFiles: 3, maxPages: null, width: 1200, height: 1600 };
+const rules = { formats: ['JPG', 'PDF', 'DOCX'], minEachBytes: null, maxEachBytes: 5_000_000, maxTotalBytes: null, maxFiles: 3, maxPages: null, width: 1200, height: 1600 };
 
 async function call(path, { method = 'GET', token, body } = {}) {
   const response = await fetch(`${base}${path}`, { method, headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), ...(body ? { 'content-type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined });
@@ -54,8 +54,35 @@ assert.equal((await call(`/api/rule-sets/${id}/share`, { method: 'DELETE', token
 assert.equal((await call(`/api/shared/${share.data.shareId}`)).status, 404);
 assert.equal((await call(`/api/rule-sets/${id}`, { method: 'DELETE', token: otherToken })).status, 404);
 assert.equal((await call(`/api/rule-sets/${id}`, { method: 'DELETE', token })).status, 200);
+assert.equal((await call('/api/submissions')).status, 401);
+const invalidSubmission = await call('/api/submissions', { method: 'POST', token, body: { title: '지원', dueDate: '2026-02-30' } });
+assert.equal(invalidSubmission.status, 400);
+const submission = await call('/api/submissions', { method: 'POST', token, body: {
+  title: '웹 개발자 지원', destination: '테스트 회사', dueDate: '2026-12-31', status: 'preparing',
+  checklist: [{ id: 'resume', label: '이력서', done: false }],
+} });
+assert.equal(submission.status, 201);
+assert.equal(submission.data.version, 1);
+assert.equal(submission.data.checklist[0].label, '이력서');
+const submissionId = submission.data.id;
+assert.equal((await call(`/api/submissions/${submissionId}`, { token: otherToken })).status, 404);
+const submissionList = await call('/api/submissions?q=%ED%85%8C%EC%8A%A4%ED%8A%B8&page=1&limit=6', { token });
+assert.equal(submissionList.status, 200);
+assert.equal(submissionList.data.total, 1);
+assert.equal(submissionList.data.items[0].id, submissionId);
+const submissionUpdate = await call(`/api/submissions/${submissionId}`, { method: 'PATCH', token, body: {
+  status: 'ready', checklist: [{ id: 'resume', label: '이력서', done: true }], expectedVersion: 1,
+} });
+assert.equal(submissionUpdate.status, 200);
+assert.equal(submissionUpdate.data.version, 2);
+assert.equal(submissionUpdate.data.checklist[0].done, true);
+const submissionConflict = await call(`/api/submissions/${submissionId}`, { method: 'PATCH', token, body: { title: '충돌', expectedVersion: 1 } });
+assert.equal(submissionConflict.status, 409);
+assert.equal(submissionConflict.data.code, 'VERSION_CONFLICT');
+assert.equal((await call(`/api/submissions/${submissionId}`, { method: 'DELETE', token: otherToken })).status, 404);
+assert.equal((await call(`/api/submissions/${submissionId}`, { method: 'DELETE', token })).status, 200);
 assert.equal((await call('/api/auth/logout', { method: 'POST', token })).status, 201);
 assert.equal((await call('/api/auth/me', { token })).status, 401);
 const login = await call('/api/auth/login', { method: 'POST', body: { username: `smoke_${suffix}`, password: pass } });
 assert.equal(login.status, 201);
-console.log('API smoke test passed: auth, validation, persistence, ownership, version conflict, share and revocation.');
+console.log('API smoke test passed: auth, rules, submission cases, validation, ownership, version conflict, share and revocation.');

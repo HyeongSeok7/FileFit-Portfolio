@@ -6,6 +6,7 @@ import { NestFactory } from '@nestjs/core';
 import type { Request, Response } from 'express';
 import { Pool } from 'pg';
 import { ApiError, object, password, positiveInt, rules, title, username, uuid } from './validation';
+import { expectedVersion as submissionVersion, submissionFields } from './submissionValidation';
 
 if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL is required');
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, connectionTimeoutMillis: 10000, max: 10 });
@@ -54,6 +55,13 @@ const columns = 'id, title, rules, version, share_id AS "shareId", created_at AS
 async function ownerRow(userId: string, id: string) {
   const result = await pool.query(`SELECT ${columns} FROM rule_sets WHERE id = $1 AND user_id = $2`, [id, userId]);
   if (!result.rows[0]) throw new ApiError(404, 'NOT_FOUND', '저장한 조건을 찾을 수 없습니다.');
+  return result.rows[0];
+}
+
+const submissionColumns = 'id, title, destination, due_date::text AS "dueDate", status, checklist, version, created_at AS "createdAt", updated_at AS "updatedAt"';
+async function ownedSubmission(userId: string, id: string) {
+  const result = await pool.query(`SELECT ${submissionColumns} FROM submissions WHERE id = $1 AND user_id = $2`, [id, userId]);
+  if (!result.rows[0]) throw new ApiError(404, 'NOT_FOUND', '제출 건을 찾을 수 없습니다.');
   return result.rows[0];
 }
 
@@ -114,6 +122,71 @@ class ApiController {
   async logout(@Req() req: Request) {
     const user = await authenticate(req);
     await pool.query('DELETE FROM sessions WHERE token_hash = $1', [user.tokenHash]);
+    return { ok: true };
+  }
+
+  @Get('submissions')
+  async listSubmissions(@Req() req: Request, @Query('q') q?: string, @Query('page') pageText?: string, @Query('limit') limitText?: string) {
+    const user = await authenticate(req);
+    const page = positiveInt(pageText, 1, 100000);
+    const limit = positiveInt(limitText, 6, 50);
+    if (q !== undefined && (typeof q !== 'string' || q.length > 100)) throw new ApiError(400, 'INVALID_QUERY', '검색어는 100자 이내로 입력해 주세요.');
+    const search = `%${(q ?? '').replace(/[\\%_]/g, '\\$&')}%`;
+    const where = "user_id = $1 AND (title ILIKE $2 ESCAPE '\\' OR destination ILIKE $2 ESCAPE '\\')";
+    const [count, items] = await Promise.all([
+      pool.query<{ total: string }>(`SELECT count(*)::text AS total FROM submissions WHERE ${where}`, [user.id, search]),
+      pool.query(`SELECT ${submissionColumns} FROM submissions WHERE ${where} ORDER BY updated_at DESC, id DESC LIMIT $3 OFFSET $4`, [user.id, search, limit, (page - 1) * limit]),
+    ]);
+    return { items: items.rows, total: Number(count.rows[0].total), page, limit };
+  }
+
+  @Post('submissions')
+  async createSubmission(@Req() req: Request, @Body() body: unknown) {
+    const user = await authenticate(req);
+    const input = submissionFields(body, false);
+    const result = await pool.query(`INSERT INTO submissions (id, user_id, title, destination, due_date, status, checklist) VALUES ($1, $2, $3, $4, $5::date, $6, $7::jsonb) RETURNING ${submissionColumns}`,
+      [randomUUID(), user.id, input.title, input.destination ?? '', input.dueDate ?? null, input.status ?? 'preparing', JSON.stringify(input.checklist ?? [])]);
+    return result.rows[0];
+  }
+
+  @Get('submissions/:id')
+  async getSubmission(@Req() req: Request, @Param('id') idText: string) {
+    const user = await authenticate(req);
+    return ownedSubmission(user.id, uuid(idText));
+  }
+
+  @Patch('submissions/:id')
+  async updateSubmission(@Req() req: Request, @Param('id') idText: string, @Body() body: unknown) {
+    const user = await authenticate(req);
+    const id = uuid(idText);
+    const raw = object(body);
+    const version = submissionVersion(raw.expectedVersion);
+    const input = submissionFields(raw, true);
+    const result = await pool.query(`UPDATE submissions SET
+      title = CASE WHEN $3::boolean THEN $4::varchar ELSE title END,
+      destination = CASE WHEN $5::boolean THEN $6::varchar ELSE destination END,
+      due_date = CASE WHEN $7::boolean THEN $8::date ELSE due_date END,
+      status = CASE WHEN $9::boolean THEN $10::varchar ELSE status END,
+      checklist = CASE WHEN $11::boolean THEN $12::jsonb ELSE checklist END,
+      version = version + 1, updated_at = now()
+      WHERE id = $1 AND user_id = $2 AND version = $13 RETURNING ${submissionColumns}`,
+      [id, user.id,
+        input.title !== undefined, input.title ?? null,
+        input.destination !== undefined, input.destination ?? null,
+        input.dueDate !== undefined, input.dueDate ?? null,
+        input.status !== undefined, input.status ?? null,
+        input.checklist !== undefined, input.checklist === undefined ? null : JSON.stringify(input.checklist),
+        version]);
+    if (result.rows[0]) return result.rows[0];
+    await ownedSubmission(user.id, id);
+    throw new ApiError(409, 'VERSION_CONFLICT', '다른 곳에서 이 제출 건을 먼저 수정했습니다. 새로고침한 뒤 다시 시도해 주세요.');
+  }
+
+  @Delete('submissions/:id')
+  async removeSubmission(@Req() req: Request, @Param('id') idText: string) {
+    const user = await authenticate(req);
+    const result = await pool.query('DELETE FROM submissions WHERE id = $1 AND user_id = $2 RETURNING id', [uuid(idText), user.id]);
+    if (!result.rows[0]) throw new ApiError(404, 'NOT_FOUND', '제출 건을 찾을 수 없습니다.');
     return { ok: true };
   }
 

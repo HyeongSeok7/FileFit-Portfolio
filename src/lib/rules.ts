@@ -29,6 +29,7 @@ export function humanBytes(bytes: number): string {
 
 const extensionToFormat: Record<string, string> = {
   jpg: 'JPG', jpeg: 'JPG', png: 'PNG', webp: 'WEBP', pdf: 'PDF',
+  docx: 'DOCX', xlsx: 'XLSX', pptx: 'PPTX', zip: 'ZIP',
 };
 
 export function formatOf(file: File): string {
@@ -42,6 +43,10 @@ function canonicalFormat(value: string): string {
   if (format === 'image/png') return 'PNG';
   if (format === 'image/webp') return 'WEBP';
   if (format === 'application/pdf') return 'PDF';
+  if (format === 'application/zip' || format === 'application/x-zip-compressed') return 'ZIP';
+  if (format === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') return 'DOCX';
+  if (format === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') return 'XLSX';
+  if (format === 'application/vnd.openxmlformats-officedocument.presentationml.presentation') return 'PPTX';
   return extensionToFormat[format] || format.toUpperCase();
 }
 
@@ -128,7 +133,7 @@ function parseSizes(text: string): Pick<SubmissionRules, 'minEachBytes' | 'maxEa
 
 function parseFormats(text: string): string[] {
   const formats: string[] = [];
-  const expression = /(?<![A-Z0-9])(?:JPEG|JPG|PNG|WEBP|PDF)(?![A-Z0-9])/gi;
+  const expression = /(?<![A-Z0-9])(?:JPEG|JPG|PNG|WEBP|PDF|DOCX|XLSX|PPTX|ZIP)(?![A-Z0-9])/gi;
   for (const match of text.matchAll(expression)) {
     const context = segmentAt(text, match.index, match.index + match[0].length);
     const before = context.before.slice(-24);
@@ -156,7 +161,7 @@ function parseCount(text: string): number | null {
     const photoContext = /(?:이미지|사진|JPG|JPEG|PNG|WEBP)\s*$/i.test(before);
     const documentContext = /(?:A4|PDF|문서|서류|원고|이력서|자기소개서|보고서|과제)(?:\s*용지|\s*기준)?\s*$/i.test(before);
     if (unit === '장' && (!photoContext || documentContext)) continue;
-    const fileContext = /(?:파일|첨부|이미지|사진|서류|문서|PDF|JPG|JPEG|PNG|WEBP)\s*$/i.test(before)
+    const fileContext = /(?:파일|첨부|이미지|사진|서류|문서|PDF|JPG|JPEG|PNG|WEBP|DOCX|XLSX|PPTX|ZIP)\s*$/i.test(before)
       || /^\s*(?:파일|이미지|사진|서류|문서)/.test(after);
     const explicitCap = /(?:최대|총|전체)\s*$/.test(before)
       || /^\s*(?:이하|이내|미만|까지|만|제한)/.test(after);

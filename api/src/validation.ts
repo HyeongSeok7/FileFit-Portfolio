@@ -37,7 +37,7 @@ export function rules(value: unknown): Rules {
   const input = object(value);
   const keys = ['formats', 'minEachBytes', 'maxEachBytes', 'maxTotalBytes', 'maxFiles', 'maxPages', 'width', 'height'];
   if (Object.keys(input).some((key) => !keys.includes(key))) throw new ApiError(400, 'INVALID_RULES', '지원하지 않는 제출 기준이 포함되어 있습니다.');
-  if (!Array.isArray(input.formats) || input.formats.length > 4 || input.formats.some((f) => typeof f !== 'string' || !['JPG', 'PNG', 'WEBP', 'PDF'].includes(f)) || new Set(input.formats).size !== input.formats.length) throw new ApiError(400, 'INVALID_RULES', '허용 형식은 JPG, PNG, WEBP, PDF 중에서 선택해 주세요.');
+  if (!Array.isArray(input.formats) || input.formats.length > 8 || input.formats.some((f) => typeof f !== 'string' || !['JPG', 'PNG', 'WEBP', 'PDF', 'DOCX', 'XLSX', 'PPTX', 'ZIP'].includes(f)) || new Set(input.formats).size !== input.formats.length) throw new ApiError(400, 'INVALID_RULES', '허용 형식은 JPG, PNG, WEBP, PDF, DOCX, XLSX, PPTX, ZIP 중에서 선택해 주세요.');
   const limits: Record<string, number> = { minEachBytes: 100_000_000, maxEachBytes: 100_000_000, maxTotalBytes: 5_000_000_000, maxFiles: 50, maxPages: 200, width: 16000, height: 16000 };
   for (const [key, max] of Object.entries(limits)) {
     const n = input[key];
